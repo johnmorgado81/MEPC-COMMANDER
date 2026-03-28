@@ -2,7 +2,7 @@
 // Uses: PDF.js (CDN), SheetJS (CDN), mammoth.js (CDN)
 // All parsing is client-side — no server required.
 
-import { notify } from '../components/ui.js';
+import { notify } from './ui.js';
 import { DB } from '../db.js';
 
 // ─────────────────────────────────────────────

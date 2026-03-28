@@ -1,4 +1,4 @@
-// ./app.js — application bootstrap
+// js/app.js — application bootstrap
 import { CONFIG }     from './config.js';
 import { initDB }     from './db.js';
 import { register, start, navigate } from './router.js';

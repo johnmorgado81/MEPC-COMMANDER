@@ -4,8 +4,8 @@
 import { MaintenanceItems } from '../db.js';
 import { EQUIPMASTER }      from '../data/equipmaster.js';
 import { CONFIG }           from '../config.js';
-import { notify, openModal, closeModal } from '../components/ui.js';
-import { formatCurrency }   from '../utils/helpers.js';
+import { notify, openModal, closeModal } from './ui.js';
+import { formatCurrency }   from '../helpers.js';
 
 export const MaintItems = {
   async init(container) {

@@ -1,8 +1,8 @@
 // reporting.js — Revenue, Equipment, Deficiency, PM Compliance reports
 
 import { DB } from '../db.js';
-import { formatCurrency, formatDate } from '../utils/helpers.js';
-import { emptyState, spinner } from '../components/ui.js';
+import { formatCurrency, formatDate } from '../helpers.js';
+import { emptyState, spinner } from './ui.js';
 
 let revenueChart = null;
 let conditionChart = null;

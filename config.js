@@ -1,4 +1,4 @@
-// MechanicsPM — Application Configuration
+// MEPC Commander — Application Configuration
 // ────────────────────────────────────────────
 // REQUIRED BEFORE FIRST USE:
 //   1. Set SUPABASE_URL and SUPABASE_ANON_KEY (from Supabase Dashboard → Settings → API)
@@ -6,10 +6,10 @@
 // See docs/setup.md for step-by-step instructions.
 
 export const CONFIG = {
-  SUPABASE_URL:      'https://gcytixguuxluijriosrm.supabase.co',
-  SUPABASE_ANON_KEY: 'sb_publishable_n5Jj1IFHy1-0ktK_AwPVSQ_Pf4pTdQF',
+  SUPABASE_URL:      'YOUR_SUPABASE_URL',
+  SUPABASE_ANON_KEY: 'YOUR_SUPABASE_ANON_KEY',
 
-  APP_NAME: 'MechanicsPM',
+  APP_NAME: 'MEPC Commander',
   VERSION:  '1.1.0',
 
   TAX_RATE: 0.05,

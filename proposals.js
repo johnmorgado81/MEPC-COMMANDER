@@ -3,9 +3,9 @@ import { setPageTitle }    from '../app.js';
 import { Proposals as DB, Buildings, Equipment, PricingMatrix, MaintenanceItems } from '../db.js';
 import { CONFIG, calcPMSellPrice } from '../config.js';
 import { getScopeText }    from './scope-library.js';
-import { generateProposalPDF } from '../utils/pdf-export.js';
-import { formatCurrency, formatDate, statusBadge, today, addDays, pad } from '../utils/helpers.js';
-import { openModal, closeModal, confirm, notify, makeSortable, spinner, emptyState } from '../components/ui.js';
+import { generateProposalPDF } from '../pdf-export.js';
+import { formatCurrency, formatDate, statusBadge, today, addDays, pad } from '../helpers.js';
+import { openModal, closeModal, confirm, notify, makeSortable, spinner, emptyState } from './ui.js';
 import { navigate }        from '../router.js';
 import { getStdHours }     from '../data/equipmaster.js';
 

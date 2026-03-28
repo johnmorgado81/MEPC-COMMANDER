@@ -13,7 +13,7 @@ Go to https://supabase.com and sign up. Free tier is fine.
 ### 1.2 Create Project
 
 Click **New Project**.
-- Name: `mechanicspm`
+- Name: `mepc-commander`
 - Database password: write this down, you'll need it
 - Region: Canada (Central)
 
@@ -84,7 +84,7 @@ Go to https://github.com and sign up if you don't have an account.
 ### 2.2 Create Repository
 
 1. Click the **+** icon (top right) → **New repository**
-2. Name: `mechanicspm`
+2. Name: `mepc-commander`
 3. Visibility: **Private**
 4. Do NOT check "Initialize with README"
 5. Click **Create repository**
@@ -92,7 +92,7 @@ Go to https://github.com and sign up if you don't have an account.
 ### 2.3 Upload Files
 
 1. In your new empty repo, click **Add file** → **Upload files**
-2. Drag and drop the entire **contents** of the `mechanicspm/` folder
+2. Drag and drop the entire **contents** of the `mepc-commander/` folder
    - `index.html` must be at the root (not inside another folder)
 3. Click **Commit changes**
 
@@ -141,7 +141,7 @@ Go to https://dash.cloudflare.com and sign up. Free.
 1. In Cloudflare → **Workers & Pages** (left sidebar)
 2. Click **Create application** → **Pages** → **Connect to Git**
 3. Sign in with GitHub → authorize Cloudflare
-4. Select your `mechanicspm` repository
+4. Select your `mepc-commander` repository
 
 ### 4.3 Build Settings
 
@@ -159,7 +159,7 @@ Click **Save and Deploy**.
 
 After ~1 minute, you'll get a URL like:
 ```
-https://mechanicspm.pages.dev
+https://mepc-commander.pages.dev
 ```
 
 Every time you update files in GitHub, Cloudflare redeploys automatically.
@@ -167,7 +167,7 @@ Every time you update files in GitHub, Cloudflare redeploys automatically.
 ### 4.5 Tell Supabase About Your URL
 
 1. Supabase → **Authentication** → **URL Configuration**
-2. Set **Site URL** to your Cloudflare URL (e.g. `https://mechanicspm.pages.dev`)
+2. Set **Site URL** to your Cloudflare URL (e.g. `https://mepc-commander.pages.dev`)
 3. Add the same URL to **Redirect URLs**
 
 This is required so the magic link email sends users to the right place.
@@ -198,7 +198,7 @@ You can't open `index.html` directly in a browser (ES modules don't work on `fil
 
 Use Python (built into macOS/Linux):
 ```bash
-cd mechanicspm/
+cd mepc-commander/
 python3 -m http.server 8080
 ```
 Open http://localhost:8080

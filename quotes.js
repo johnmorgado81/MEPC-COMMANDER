@@ -2,9 +2,9 @@
 import { setPageTitle }   from '../app.js';
 import { Quotes as DB, Buildings, Deficiencies, MarkupMatrix } from '../db.js';
 import { CONFIG, applyMarkup, getMarkupMultiplier } from '../config.js';
-import { generateQuotePDF } from '../utils/pdf-export.js';
-import { formatCurrency, formatDate, statusBadge, today, addDays, pad, isOverdue } from '../utils/helpers.js';
-import { openModal, closeModal, confirm, notify, makeSortable, spinner, emptyState } from '../components/ui.js';
+import { generateQuotePDF } from '../pdf-export.js';
+import { formatCurrency, formatDate, statusBadge, today, addDays, pad, isOverdue } from '../helpers.js';
+import { openModal, closeModal, confirm, notify, makeSortable, spinner, emptyState } from './ui.js';
 import { navigate }       from '../router.js';
 
 export const Quotes = {

@@ -9,7 +9,7 @@
 //   - Does not support rotated, blurry, or compressed screenshots well
 //   - DWG/DXF not supported
 
-import { notify } from '../components/ui.js';
+import { notify } from './ui.js';
 import { Buildings, DB as _db } from '../db.js';
 
 // Field extraction patterns tuned for Service Fusion and Jobber UI layouts

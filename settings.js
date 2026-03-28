@@ -3,8 +3,8 @@
 
 import { MarkupMatrix, UserSettings } from '../db.js';
 import { CONFIG }                      from '../config.js';
-import { notify }                      from '../components/ui.js';
-import { formatCurrency }              from '../utils/helpers.js';
+import { notify }                      from './ui.js';
+import { formatCurrency }              from '../helpers.js';
 
 export const Settings = {
   async init(container) {

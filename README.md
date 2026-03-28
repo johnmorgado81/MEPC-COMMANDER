@@ -1,4 +1,4 @@
-# MechanicsPM — v1.1
+# MEPC Commander — v1.1
 
 Mechanical contracting PM management. Vanilla JS SPA. No build step.
 
@@ -41,7 +41,7 @@ Full instructions: `docs/setup.md`
 ## File Tree
 
 ```
-mechanicspm/
+mepc-commander/
 ├── index.html
 ├── README.md
 ├── css/styles.css

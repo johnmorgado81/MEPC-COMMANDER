@@ -1,5 +1,5 @@
 -- =============================================================
--- MechanicsPM — Supabase Database Schema
+-- MEPC Commander — Supabase Database Schema
 -- Run this in: Supabase Dashboard → SQL Editor → New Query
 -- =============================================================
 

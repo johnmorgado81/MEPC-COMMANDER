@@ -2,8 +2,8 @@
 import { setPageTitle }   from '../app.js';
 import { PricingMatrix }  from '../db.js';
 import { CONFIG }         from '../config.js';
-import { formatCurrency } from '../utils/helpers.js';
-import { confirm, notify, spinner } from '../components/ui.js';
+import { formatCurrency } from '../helpers.js';
+import { confirm, notify, spinner } from './ui.js';
 
 const FREQS = ['annual','semi-annual','quarterly','monthly'];
 

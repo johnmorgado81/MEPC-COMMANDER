@@ -1,5 +1,5 @@
 // js/utils/pdf-export.js — jsPDF document generation helpers
-import { CONFIG } from '../config.js';
+import { CONFIG } from './config.js';
 import { formatCurrency, formatDate } from './helpers.js';
 
 function getjsPDF() {
