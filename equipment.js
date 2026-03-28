@@ -1,10 +1,10 @@
 // js/modules/equipment.js
-import { setPageTitle }   from '../app.js';
-import { Equipment as DB, Buildings } from '../db.js';
-import { CONFIG }         from '../config.js';
-import { formatDate, statusBadge, exportCSV, today, addMonths, isOverdue, isDueSoon } from '../helpers.js';
+import { setPageTitle }   from './app.js';
+import { Equipment as DB, Buildings } from './db.js';
+import { CONFIG }         from './config.js';
+import { formatDate, statusBadge, exportCSV, today, addMonths, isOverdue, isDueSoon } from './helpers.js';
 import { openModal, closeModal, confirm, notify, filterTable, makeSortable, getFormData, selectOptions, spinner, emptyState } from './ui.js';
-import { navigate }       from '../router.js';
+import { navigate }       from './router.js';
 
 export const Equipment = {
 

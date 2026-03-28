@@ -1,11 +1,11 @@
 // maintenance-items.js — Equipment type library with standard PM hours
 // Drives proposal time estimates. Sourced from EQUIPMASTER.xlsx (174 types).
 
-import { MaintenanceItems } from '../db.js';
-import { EQUIPMASTER }      from '../data/equipmaster.js';
-import { CONFIG }           from '../config.js';
+import { MaintenanceItems } from './db.js';
+import { EQUIPMASTER }      from './equipmaster.js';
+import { CONFIG }           from './config.js';
 import { notify, openModal, closeModal } from './ui.js';
-import { formatCurrency }   from '../helpers.js';
+import { formatCurrency }   from './helpers.js';
 
 export const MaintItems = {
   async init(container) {

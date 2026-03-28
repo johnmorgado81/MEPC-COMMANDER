@@ -1,8 +1,8 @@
 // js/modules/dashboard.js
-import { setPageTitle } from '../app.js';
-import { Stats, Equipment, Deficiencies, Quotes } from '../db.js';
-import { formatCurrency, formatDate, isOverdue, isDueSoon, statusBadge } from '../helpers.js';
-import { navigate } from '../router.js';
+import { setPageTitle } from './app.js';
+import { Stats, Equipment, Deficiencies, Quotes } from './db.js';
+import { formatCurrency, formatDate, isOverdue, isDueSoon, statusBadge } from './helpers.js';
+import { navigate } from './router.js';
 
 export const Dashboard = {
   async init(container) {

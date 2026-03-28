@@ -2,8 +2,8 @@
 // Sign-in with email → Supabase sends a link → user clicks → session persists.
 // No password. No registration. Internal single-company use.
 
-import { getClient } from '../db.js';
-import { CONFIG }     from '../config.js';
+import { getClient } from './db.js';
+import { CONFIG }     from './config.js';
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 

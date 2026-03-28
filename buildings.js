@@ -1,10 +1,10 @@
 // js/modules/buildings.js
-import { setPageTitle }   from '../app.js';
-import { Buildings as DB, Equipment } from '../db.js';
-import { CONFIG }         from '../config.js';
-import { formatDate, statusBadge, exportCSV, today, isOverdue, isDueSoon } from '../helpers.js';
+import { setPageTitle }   from './app.js';
+import { Buildings as DB, Equipment } from './db.js';
+import { CONFIG }         from './config.js';
+import { formatDate, statusBadge, exportCSV, today, isOverdue, isDueSoon } from './helpers.js';
 import { openModal, closeModal, confirm, notify, filterTable, makeSortable, getFormData, selectOptions, spinner, emptyState } from './ui.js';
-import { navigate }       from '../router.js';
+import { navigate }       from './router.js';
 
 export const Buildings = {
 

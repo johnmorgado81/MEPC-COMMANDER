@@ -1,9 +1,9 @@
 // js/modules/pm-records.js
-import { setPageTitle }    from '../app.js';
-import { PMRecords as DB, Buildings, Equipment, Proposals, Deficiencies } from '../db.js';
-import { formatDate, statusBadge, today, pad, addMonths } from '../helpers.js';
+import { setPageTitle }    from './app.js';
+import { PMRecords as DB, Buildings, Equipment, Proposals, Deficiencies } from './db.js';
+import { formatDate, statusBadge, today, pad, addMonths } from './helpers.js';
 import { openModal, closeModal, confirm, notify, makeSortable, spinner, emptyState, getFormData } from './ui.js';
-import { navigate }        from '../router.js';
+import { navigate }        from './router.js';
 
 export const PMRecords = {
 

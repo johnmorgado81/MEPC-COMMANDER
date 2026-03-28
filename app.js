@@ -2,22 +2,22 @@
 import { CONFIG }     from './config.js';
 import { initDB }     from './db.js';
 import { register, start, navigate } from './router.js';
-import { Auth, showAuthScreen, hideAuthScreen, renderUserBadge } from './modules/auth.js';
+import { Auth, showAuthScreen, hideAuthScreen, renderUserBadge } from './auth.js';
 
 // Lazy-load all modules (reduces initial parse time)
 const load = {
-  Dashboard:   () => import('./modules/dashboard.js').then(m => m.Dashboard),
-  Buildings:   () => import('./modules/buildings.js').then(m => m.Buildings),
-  Equipment:   () => import('./modules/equipment.js').then(m => m.Equipment),
-  Proposals:   () => import('./modules/proposals.js').then(m => m.Proposals),
-  PMRecords:   () => import('./modules/pm-records.js').then(m => m.PMRecords),
-  Quotes:      () => import('./modules/quotes.js').then(m => m.Quotes),
-  Pricing:     () => import('./modules/pricing.js').then(m => m.Pricing),
-  Reporting:   () => import('./modules/reporting.js').then(m => m.renderReporting),
-  DocParser:   () => import('./modules/document-parser.js').then(m => m.renderDocumentParser),
-  MaintItems:  () => import('./modules/maintenance-items.js').then(m => m.MaintItems),
-  Settings:    () => import('./modules/settings.js').then(m => m.Settings),
-  DispatchOCR: () => import('./modules/dispatch-ocr.js').then(m => m.DispatchOCR),
+  Dashboard:   () => import('./dashboard.js').then(m => m.Dashboard),
+  Buildings:   () => import('./buildings.js').then(m => m.Buildings),
+  Equipment:   () => import('./equipment.js').then(m => m.Equipment),
+  Proposals:   () => import('./proposals.js').then(m => m.Proposals),
+  PMRecords:   () => import('./pm-records.js').then(m => m.PMRecords),
+  Quotes:      () => import('./quotes.js').then(m => m.Quotes),
+  Pricing:     () => import('./pricing.js').then(m => m.Pricing),
+  Reporting:   () => import('./reporting.js').then(m => m.renderReporting),
+  DocParser:   () => import('./document-parser.js').then(m => m.renderDocumentParser),
+  MaintItems:  () => import('./maintenance-items.js').then(m => m.MaintItems),
+  Settings:    () => import('./settings.js').then(m => m.Settings),
+  DispatchOCR: () => import('./dispatch-ocr.js').then(m => m.DispatchOCR),
 };
 
 const NAV_ITEMS = [

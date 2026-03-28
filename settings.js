@@ -1,10 +1,10 @@
 // settings.js — Admin settings: rate sheet, markup matrix, XLSX upload
 // All changes persist to Supabase (markup_matrix + user_settings tables).
 
-import { MarkupMatrix, UserSettings } from '../db.js';
-import { CONFIG }                      from '../config.js';
+import { MarkupMatrix, UserSettings } from './db.js';
+import { CONFIG }                      from './config.js';
 import { notify }                      from './ui.js';
-import { formatCurrency }              from '../helpers.js';
+import { formatCurrency }              from './helpers.js';
 
 export const Settings = {
   async init(container) {

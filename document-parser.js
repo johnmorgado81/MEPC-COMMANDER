@@ -3,7 +3,7 @@
 // All parsing is client-side — no server required.
 
 import { notify } from './ui.js';
-import { DB } from '../db.js';
+import { DB } from './db.js';
 
 // ─────────────────────────────────────────────
 // Main Render

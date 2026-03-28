@@ -10,7 +10,7 @@
 //   - DWG/DXF not supported
 
 import { notify } from './ui.js';
-import { Buildings, DB as _db } from '../db.js';
+import { Buildings, DB as _db } from './db.js';
 
 // Field extraction patterns tuned for Service Fusion and Jobber UI layouts
 const PATTERNS = {
@@ -300,13 +300,13 @@ export const DispatchOCR = {
 
       try {
         // Import PMRecords dynamically to avoid circular dep
-        const { PMRecords: DB_PM } = await import('../db.js');
+        const { PMRecords: DB_PM } = await import('./db.js');
         // Use nextSequence from db
-        const { nextSequence } = await import('../db.js');
+        const { nextSequence } = await import('./db.js');
         const seq = await nextSequence('record');
         draft.record_number = `SR-${seq}`;
         // We only have the basic CRUD here — push to pm_records with incomplete status
-        const { getClient } = await import('../db.js');
+        const { getClient } = await import('./db.js');
         const sb = getClient();
         const { data, error } = await sb.from('pm_records').insert(draft).select().single();
         if (error) throw error;
@@ -321,7 +321,7 @@ export const DispatchOCR = {
 
   async _loadBuildings() {
     try {
-      const { Buildings: DB_B } = await import('../db.js');
+      const { Buildings: DB_B } = await import('./db.js');
       const buildings = await DB_B.getAll();
       const sel = document.getElementById('ocr-building-select');
       if (!sel) return;
