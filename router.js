@@ -73,24 +73,3 @@ export function start() {
   window.addEventListener('hashchange', dispatch);
   dispatch();
 }
-// ── User Settings ─────────────────────────────────────────
-export const UserSettings = {
-  async get(key) {
-    const { data, error } = await _sb
-      .from('user_settings')
-      .select('value')
-      .eq('key', key)
-      .single();
-    if (error) return null;
-    return data?.value ?? null;
-  },
-  async set(key, value) {
-    const { data, error } = await _sb
-      .from('user_settings')
-      .upsert({ key, value, updated_at: new Date().toISOString() })
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  },
-};
