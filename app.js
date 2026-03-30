@@ -108,7 +108,7 @@ function wireTopbar() {
 
 // ─── Auth guard + boot ──────────────────────────────────────────────────────
 async function boot() {
-  initDB();
+  try { initDB(); } catch(e) { console.warn("DB init failed:", e.message); }
   renderSidebarLogo();
   renderNav();
   registerRoutes();

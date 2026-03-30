@@ -25,16 +25,17 @@ export const Buildings = {
 
     await this.loadTable();
 
-    document.getElementById('bld-add').onclick = () => this.openForm();
-    document.getElementById('bld-search').oninput = (e) => {
+    const addBtn = document.getElementById('bld-add'); if (addBtn) addBtn.onclick = () => this.openForm();
+    const searchEl = document.getElementById('bld-search'); if (searchEl) searchEl.oninput = (e) => {
       const tbl = document.querySelector('#bld-table-wrap table');
       if (tbl) filterTable(e.target, tbl);
     };
-    document.getElementById('bld-export').onclick = () => this.exportData();
+    const exportBtn = document.getElementById('bld-export'); if (exportBtn) exportBtn.onclick = () => this.exportData();
   },
 
   async loadTable() {
     const wrap = document.getElementById('bld-table-wrap');
+    if (!wrap) return;
     try {
       const rows = await DB.getAll();
       if (!rows.length) { wrap.innerHTML = emptyState('No buildings yet.', '<button class="btn btn-primary" onclick="document.getElementById(\'bld-add\').click()">Add First Building</button>'); return; }

@@ -10,7 +10,7 @@
 //   - DWG/DXF not supported
 
 import { notify } from './ui.js';
-import { Buildings, DB as _db } from './db.js';
+import { Buildings } from './db.js';
 
 // Field extraction patterns tuned for Service Fusion and Jobber UI layouts
 const PATTERNS = {

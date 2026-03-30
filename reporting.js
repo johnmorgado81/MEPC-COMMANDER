@@ -1,6 +1,6 @@
 // reporting.js — Revenue, Equipment, Deficiency, PM Compliance reports
 
-import { DB } from './db.js';
+import { Stats, Equipment, Deficiencies, Quotes, Proposals, PMRecords } from './db.js';
 import { formatCurrency, formatDate } from './helpers.js';
 import { emptyState, spinner } from './ui.js';
 
@@ -48,9 +48,9 @@ function loadTab(tab) {
 async function renderRevenue(el) {
   try {
     const [revenueData, quotes, proposals] = await Promise.all([
-      DB.Stats.getRevenueByMonth(),
-      DB.Quotes.getAll(),
-      DB.Proposals.getAll(),
+      Stats.getRevenueByMonth(),
+      Quotes.getAll(),
+      Proposals.getAll(),
     ]);
 
     const activeContracts = proposals.filter(p => p.status === 'active');
@@ -160,7 +160,7 @@ function buildQuoteStatusChart(quotes) {
 // --- Equipment ---
 async function renderEquipment(el) {
   try {
-    const equipment = await DB.Equipment.getAll();
+    const equipment = await Equipment.getAll();
     const conditionMap = {};
     const typeMap = {};
 
@@ -254,7 +254,7 @@ async function renderEquipment(el) {
 // --- Deficiencies ---
 async function renderDeficiencies(el) {
   try {
-    const deficiencies = await DB.Deficiencies.getAll();
+    const deficiencies = await Deficiencies.getAll();
     const open = deficiencies.filter(d => d.status !== 'resolved');
     const now = new Date();
 
@@ -350,8 +350,8 @@ async function renderDeficiencies(el) {
 async function renderCompliance(el) {
   try {
     const [equipment, records] = await Promise.all([
-      DB.Equipment.getAll(),
-      DB.PMRecords.getAll(),
+      Equipment.getAll(),
+      PMRecords.getAll(),
     ]);
 
     const now = new Date();

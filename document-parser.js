@@ -3,7 +3,7 @@
 // All parsing is client-side — no server required.
 
 import { notify } from './ui.js';
-import { DB } from './db.js';
+import { PricingMatrix } from './db.js';
 
 // ─────────────────────────────────────────────
 // Main Render
@@ -522,7 +522,7 @@ async function importPricingRows(rows, btn) {
     const sellPrice = parseFloat(row['sell_price'] || row['Sell Price'] || row['Price'] || 0);
     if (!equipType || !frequency || !sellPrice) { errors++; continue; }
     try {
-      await DB.PricingMatrix.upsert({ equipment_type: equipType, service_frequency: frequency, sell_price: sellPrice, active: true });
+      await PricingMatrix.upsert({ equipment_type: equipType, service_frequency: frequency, sell_price: sellPrice, active: true });
       count++;
     } catch { errors++; }
   }

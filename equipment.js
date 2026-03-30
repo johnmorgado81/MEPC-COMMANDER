@@ -66,8 +66,9 @@ export const Equipment = {
 
   async loadTable() {
     const wrap = document.getElementById('eq-table-wrap');
+    if (!wrap) return;
     try {
-      const rows = await DB.getAll();
+      const rows = (await DB.getAll()) || [];
       if (!rows.length) { wrap.innerHTML = emptyState('No equipment records yet.'); return; }
       wrap.innerHTML = `<table class="table" id="eq-table">
         <thead><tr>
@@ -278,8 +279,8 @@ export const Equipment = {
   },
 
   async exportData() {
-    const rows = await DB.getAll();
-    exportCSV(rows.map(e => ({
+    const rows = (await DB.getAll()) || [];
+    exportCSV((rows || []).map(e => ({
       Tag: e.tag, Type: e.equipment_type, Make: e.make, Model: e.model,
       Serial: e.serial_number, Building: e.buildings?.name,
       'Last Service': e.last_service_date, 'Next Service': e.next_service_date,
