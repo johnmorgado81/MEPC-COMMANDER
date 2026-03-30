@@ -408,3 +408,50 @@ exception when others then null; end $$;
 comment on column proposals.cover_image_url is 'URL or null — cover image stored externally if using Supabase Storage';
 comment on column proposals.raw_intake is 'Raw extracted data from OCR, file parse, and drawing scan';
 comment on column proposals.is_draft is 'True while proposal is in wizard/draft state';
+
+-- =============================================================
+-- BUILDING + EQUIPMENT EXTENDED MODEL (v1.2 migration)
+-- Run in Supabase SQL Editor — safe to run multiple times
+-- =============================================================
+
+-- Buildings: extended fields
+do $$ begin
+  alter table buildings add column if not exists contact_name       text;
+  alter table buildings add column if not exists contact_email      text;
+  alter table buildings add column if not exists contact_phone      text;
+  alter table buildings add column if not exists building_notes     text;
+  alter table buildings add column if not exists proposal_notes     text;
+  alter table buildings add column if not exists access_notes       text;
+  alter table buildings add column if not exists subcontractor_scopes jsonb default '[]'::jsonb;
+  -- Service area enablement flags
+  alter table buildings add column if not exists common_strata_enabled        boolean default true;
+  alter table buildings add column if not exists commercial_enabled           boolean default false;
+  alter table buildings add column if not exists residential_enabled          boolean default false;
+  alter table buildings add column if not exists primary_service_area         text    default 'common_strata';
+exception when others then null; end $$;
+
+-- Equipment: extended fields for PM proposal workflow
+do $$ begin
+  alter table equipment add column if not exists service_area              text    default 'common_strata';
+  alter table equipment add column if not exists equipment_class           text;
+  alter table equipment add column if not exists category                  text;
+  alter table equipment add column if not exists qty                       integer default 1;
+  alter table equipment add column if not exists quarterly_hours           numeric(6,2);
+  alter table equipment add column if not exists annual_hours              numeric(6,2);
+  alter table equipment add column if not exists override_quarterly_hours  numeric(6,2);
+  alter table equipment add column if not exists override_annual_hours     numeric(6,2);
+  alter table equipment add column if not exists manufacturer              text;
+  alter table equipment add column if not exists description               text;
+  alter table equipment add column if not exists source_type               text    default 'manual';
+  alter table equipment add column if not exists source_reference          text;
+  alter table equipment add column if not exists match_confidence          text    default 'manual';
+exception when others then null; end $$;
+
+-- Rename make column if it exists as "make" already (no-op if already "manufacturer")
+-- (The original schema used "make" — equipment.js now uses "manufacturer")
+-- Keep both: "make" stays for backward compat, "manufacturer" is the new display field
+-- They are separate columns; openForm writes to "manufacturer"
+
+-- Index for service area grouping
+create index if not exists equipment_service_area_idx on equipment(building_id, service_area);
+create index if not exists equipment_category_idx     on equipment(category);

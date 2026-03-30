@@ -6,8 +6,8 @@
 // See docs/setup.md for step-by-step instructions.
 
 export const CONFIG = {
-  SUPABASE_URL:      'https://gcytixguuxluijriosrm.supabase.co',
-  SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdjeXRpeGd1dXhsdWlqcmlvc3JtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2NzgyMDgsImV4cCI6MjA5MDI1NDIwOH0.Jb81RCpCE-dYB2b-H6Pw22gxXtggBqhIBjoqVmcSMf8',
+  SUPABASE_URL:      'YOUR_SUPABASE_URL',
+  SUPABASE_ANON_KEY: 'YOUR_SUPABASE_ANON_KEY',
 
   APP_NAME: 'MEPC Commander',
   VERSION:  '1.1.0',
@@ -73,6 +73,69 @@ export const CONFIG = {
 
   CONDITION_OPTIONS:  ['Excellent','Good','Fair','Poor','Critical'],
   BUILDING_TYPES:     ['Commercial','Strata / Residential','Industrial','Institutional','Mixed-Use','Highrise'],
+
+  SERVICE_AREAS: [
+    { value: 'common_strata',        label: 'Common Strata Areas' },
+    { value: 'commercial',           label: 'Commercial Areas' },
+    { value: 'residential_in_suite', label: 'Residential / In-Suite' },
+  ],
+
+  // Full equipment type list — selectable in forms
+  EQUIPMENT_TYPES: [
+    // HVAC
+    'Air Handling Unit','Rooftop Unit','Fan Coil Unit','Make-Up Air Unit',
+    'Heat Recovery Ventilator','Energy Recovery Ventilator','Variable Air Volume Box',
+    'Unit Ventilator','Split System','VRF / VRV System','Exhaust Fan','Supply Fan',
+    // Hydronic
+    'Hot Water Boiler','Steam Boiler','Condensing Boiler',
+    'Chiller','Cooling Tower','Condenser',
+    'Plate Heat Exchanger','Shell & Tube Heat Exchanger',
+    'Circulation Pump','Domestic Water Pump','Condensate Pump','Booster Pump',
+    'Expansion Tank','Pressure Reducing Valve','Pressure Relief Valve',
+    // Plumbing
+    'Domestic Hot Water Heater','Storage Tank','Indirect Water Heater','Tankless Water Heater',
+    'Backflow Preventer','Sump Pump','Sewage Ejector',
+    'Grease Interceptor','Sand Interceptor',
+    // Gas
+    'Gas Fireplace','Gas Barbeque','Gas Fire Pit','Gas Unit Heater','Gas Infrared Heater',
+    // Controls
+    'BAS Controller','DDC Panel','Network Controller','Variable Frequency Drive','Thermostat',
+    // Drainage
+    'Storm Pump','Duplex Sump Pump','Lift Station',
+    // Other
+    'Air Compressor','Snowmelt Pump','Pool Pump','Pool Heater','Irrigation Pump',
+    'Generator','Transfer Switch','Fuel Oil Tank',
+    'Chemical Feeder','Side Stream Filter','Conductivity Controller',
+    'Other',
+  ],
+
+  // Equipment class — normalized for EQUIPMASTER lookup and scope templates
+  EQUIPMENT_CLASSES: [
+    'Air Handling Unit','Rooftop Unit','Fan Coil Unit','Make-Up Air Unit','HRV/ERV',
+    'Split System','VRF System','Exhaust Fan','VAV Box',
+    'Boiler','Chiller','Cooling Tower','Heat Exchanger',
+    'Pump','Expansion Tank','PRV','Backflow Preventer',
+    'Water Heater','Storage Tank',
+    'Fireplace','Barbeque','Unit Heater',
+    'BAS Controller','DDC Panel','VFD','Thermostat',
+    'Sump Pump','Sewage Ejector','Grease Interceptor',
+    'Air Compressor','Generator','Pool Equipment','Irrigation',
+    'Chemical Treatment','Other',
+  ],
+
+  EQUIPMENT_CATEGORIES: [
+    'HVAC','Hydronic','Plumbing','Gas','Drainage','Controls',
+    'Backup & Fuel','Chemical Treatment','Pool','Irrigation',
+    'Compressed Air','Radiant / Snowmelt','Meters & Gauges','Valves',
+    'Fire Protection','Other',
+  ],
+
+  SUBCONTRACTOR_CATEGORIES: [
+    'DDC Controls Management',
+    'Chemical Treatment Management',
+    'HVAC/R Subcontractor',
+    'Fire Sprinkler Contractor',
+  ],
 
   DEFICIENCY_PRIORITIES: [
     { value: 'Critical', label: 'Critical', color: '#dc2626' },
