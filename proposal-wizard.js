@@ -294,6 +294,14 @@ async function _step3(el, wiz) {
       <button class="btn btn-sm btn-secondary" id="add-equip-row">+ Add Row</button>
       ${S.equipFile || S.drawingFile ? `<button class="btn btn-sm btn-primary" id="parse-files-btn">⟳ Parse Uploaded Files</button>` : ''}
     </div>
+    ${S.rfpScope.length ? `<div class="rfp-scope-block" style="margin-top:1rem">
+      <div class="form-section-title">Program / RFP Scope Detected (${S.rfpScope.length} items)</div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:.5rem">These will appear as structured scope items in the proposal. Uncheck to exclude.</p>
+      <div id="rfp-checklist">${S.rfpScope.map((r,i) => `<label style="display:flex;gap:.5rem;align-items:flex-start;margin-bottom:.4rem;cursor:pointer">
+        <input type="checkbox" class="rfp-chk" data-i="${i}" checked style="margin-top:3px">
+        <span><strong>${r.label}</strong><br><span style="font-size:12px;color:var(--text-muted)">${r.detail}</span></span>
+      </label>`).join('')}</div>
+    </div>` : ''}
     <div class="wiz-actions">
       <button class="btn btn-secondary" id="s3-back">← Back</button>
       <button class="btn btn-primary" id="s3-next">Next: Price →</button>
@@ -301,7 +309,15 @@ async function _step3(el, wiz) {
   </div>`;
 
   document.getElementById('s3-back').onclick = () => wiz.back();
-  document.getElementById('s3-next').onclick = () => { _saveRawTable(); wiz.next(); };
+  document.getElementById('s3-next').onclick = () => {
+    _saveRawTable();
+    // Save rfp checked state
+    document.querySelectorAll('.rfp-chk').forEach(chk => {
+      const i = Number(chk.dataset.i);
+      if (S.rfpScope[i]) S.rfpScope[i]._excluded = !chk.checked;
+    });
+    wiz.next();
+  };
   document.getElementById('add-equip-row').onclick = () => {
     _saveRawTable();
     S.rawEquipment.push({ type:'', tag:'', manufacturer:'', model:'', qty:1, location:'', source:'manual' });
@@ -367,6 +383,29 @@ function _saveRawTable() {
 }
 
 // ─── File parsers ─────────────────────────────────────────────────────────────
+async function _getRawText(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (ext === 'docx') {
+    if (!window.mammoth) return '';
+    const buf = await file.arrayBuffer();
+    const r = await mammoth.extractRawText({ arrayBuffer: buf });
+    return r.value;
+  }
+  if (ext === 'pdf') {
+    if (!window.pdfjsLib) return '';
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    let txt = '';
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const c = await page.getTextContent();
+      txt += c.items.map(i => i.str).join(' ') + '\n';
+    }
+    return txt;
+  }
+  return '';
+}
+
 async function _parseEquipFile(file, statusEl) {
   const ext = file.name.split('.').pop().toLowerCase();
   if (ext === 'xlsx' || ext === 'xls') return _parseXLSX(file);
@@ -429,18 +468,67 @@ const MFR_RE = /\b(Trane|Carrier|Daikin|York|Lennox|Viessmann|Lochinvar|Grundfos
 function _extractEquipFromText(text, source) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   const items = [], seen = new Set();
+
   for (const line of lines) {
+    // Pass 1: vocab match (high confidence)
     for (const m of line.matchAll(EQUIP_VOCAB_RE)) {
       const type = m[1];
-      const tags = [...line.matchAll(TAG_RE)].map(t => t[1]);
+      const tags = [...line.matchAll(TAG_RE)].map(t => t[1]).filter(t => !/^(AND|THE|FOR|WITH|FROM|UNIT|EACH|TYPE|SIZE|NOTE|SEE|REF|SHT|DWG|REV|DATE|MARK|ITEM)$/.test(t));
       const mfrs = [...line.matchAll(MFR_RE)].map(t => t[1]);
-      const key  = type.toLowerCase() + (tags[0]||'');
-      if (seen.has(key)) continue;
-      seen.add(key);
-      items.push({ type, tag: tags[0]||'', manufacturer: mfrs[0]||'', model:'', qty:1, location:'', source });
+      // If line has explicit tag(s), create one item per tag
+      if (tags.length > 0) {
+        tags.forEach(tag => {
+          const key = type.toLowerCase() + tag;
+          if (seen.has(key)) return;
+          seen.add(key);
+          items.push({ type, tag, manufacturer: mfrs[0]||'', model:'', qty:1, location:'', source, conf:'strong' });
+        });
+      } else {
+        // No tag — single item, detect quantity from text
+        const qtyM = line.match(/\b(\d{1,2})\s*(?:no\.?|nr|qty|units?|ea\.?)\b/i) ||
+                     line.match(/^(\d{1,2})\s+/);
+        const qty = qtyM ? parseInt(qtyM[1]) : 1;
+        const key = type.toLowerCase() + line.slice(0,20);
+        if (seen.has(key)) return;
+        seen.add(key);
+        items.push({ type, tag:'', manufacturer: mfrs[0]||'', model:'', qty, location:'', source, conf:'medium' });
+      }
+    }
+
+    // Pass 2: tag-only lines (e.g. "P-1, P-2, P-3 — Circulation Pump")
+    const allTags = [...line.matchAll(TAG_RE)].map(t => t[1]).filter(t =>
+      !/^(AND|THE|FOR|WITH|FROM|UNIT|EACH|TYPE|SIZE|NOTE|SEE|REF|SHT|DWG|REV|DATE|MARK|ITEM|HVAC|AHU|RTU|FCU|VFD|DDC|BAS|VAV|MUA|ERV|HRV)$/.test(t) &&
+      t.length >= 2
+    );
+    // Only process if line isn't already captured by vocab and has a recognisable tag pattern (letter-number)
+    if (allTags.length > 0 && !line.match(EQUIP_VOCAB_RE)) {
+      // Try to extract type description from line (text after last tag)
+      const lastTag = allTags[allTags.length - 1];
+      const afterTag = line.slice(line.lastIndexOf(lastTag) + lastTag.length).replace(/^[\s,\-–—:]+/, '').split(/[,;]/)[0].trim();
+      if (afterTag.length > 3) {
+        allTags.forEach(tag => {
+          const key = 'tagged:' + tag;
+          if (seen.has(key)) return;
+          seen.add(key);
+          items.push({ type: afterTag.slice(0,60), tag, manufacturer:'', model:'', qty:1, location:'', source, conf:'review' });
+        });
+      }
     }
   }
-  return items.slice(0, 150);
+
+  // Group items with same type and no tag into single rows with summed qty
+  const grouped = [], groupSeen = {};
+  items.forEach(item => {
+    if (!item.tag) {
+      const k = item.type.toLowerCase();
+      if (groupSeen[k]) { groupSeen[k].qty += item.qty; return; }
+      groupSeen[k] = item; grouped.push(item);
+    } else {
+      grouped.push(item);
+    }
+  });
+
+  return grouped.slice(0, 200);
 }
 
 // ─── Step 4 — Normalize & Price ───────────────────────────────────────────────
@@ -491,6 +579,39 @@ async function _step4(el, wiz) {
   _bindNormTable();
 }
 
+
+// ─── RFP / Program scope extraction ─────────────────────────────────────────
+const RFP_PATTERNS = [
+  { re: /quarterly\s+(?:preventive\s+)?maintenance|quarterly\s+pm\s+program/i, label: 'Quarterly Preventive Maintenance Program', detail: 'Full PM visit performed quarterly per equipment schedule' },
+  { re: /semi.?annual\s+(?:maintenance|pm)/i, label: 'Semi-Annual Preventive Maintenance', detail: 'Two scheduled PM visits per year' },
+  { re: /annual\s+(?:maintenance|pm|service)/i, label: 'Annual Preventive Maintenance', detail: 'Annual full-service maintenance visit' },
+  { re: /annual\s+report(?:ing)?/i, label: 'Annual Maintenance Report', detail: 'Written annual report delivered to property manager' },
+  { re: /cooling\s+tower\s+(?:service|clean|inspect|treat)/i, label: 'Cooling Tower Service', detail: 'Clean, inspect, and chemically treat cooling tower per schedule' },
+  { re: /boiler\s+(?:teardown|strip|annual|overhaul|inspection)/i, label: 'Boiler Annual Teardown & Inspection', detail: 'Annual boiler strip-down, combustion test, safety device inspection' },
+  { re: /pump\s+(?:service|inspect|overhaul)/i, label: 'Pump Service & Inspection', detail: 'Inspect seals, bearings, impeller; verify flow and pressure' },
+  { re: /expansion\s+tank\s+inspect/i, label: 'Expansion Tank Inspection', detail: 'Inspect pre-charge pressure and condition' },
+  { re: /backflow\s+(?:test|inspect|certif)/i, label: 'Backflow Preventer Testing', detail: 'Annual certified test and reporting per BCWWA requirements' },
+  { re: /ddc\s+(?:monitor|inspect|review)|bas\s+(?:review|monitor)/i, label: 'DDC / BAS Monitoring & Review', detail: 'Review control sequences, alarms, setpoints, and trend data' },
+  { re: /filter\s+(?:change|replac|service)|air\s+filter/i, label: 'Air Filter Replacement Program', detail: 'Replace all air filters per schedule with specified filter media' },
+  { re: /24.?hour\s+(?:emergency|response)|emergency\s+(?:line|service)/i, label: '24-Hour Emergency Response', detail: 'Emergency service line available 24/7; after-hours rates apply' },
+  { re: /glycol\s+(?:test|check|inspect)|antifreeze/i, label: 'Glycol System Testing', detail: 'Test glycol concentration and inhibitor levels; top up as required' },
+  { re: /chemical\s+(?:treatment|treat|program)|water\s+treatment/i, label: 'Chemical Water Treatment', detail: 'Monitor and maintain chemical treatment program for hydronic systems' },
+  { re: /vibration\s+(?:analysis|test|monitor)/i, label: 'Vibration Analysis', detail: 'Assess rotating equipment for abnormal vibration signatures' },
+  { re: /performance\s+review|annual\s+review\s+meeting/i, label: 'Annual Performance Review Meeting', detail: 'Annual meeting with property manager to review maintenance performance' },
+];
+
+function _extractRFPScope(text) {
+  const found = [];
+  const seen  = new Set();
+  for (const p of RFP_PATTERNS) {
+    if (p.re.test(text) && !seen.has(p.label)) {
+      seen.add(p.label);
+      found.push({ label: p.label, detail: p.detail });
+    }
+  }
+  return found;
+}
+
 function _normalizeItem(raw) {
   const match = findEquipType(raw.type);
   let conf = 'unknown', qtrHrs = 1.0, annHrs = 4.0, category = 'Other', equipmaster = null;
@@ -499,14 +620,20 @@ function _normalizeItem(raw) {
     category    = match.category || 'Other';
     qtrHrs      = match.quarterly_std_hours  || 1.0;
     annHrs      = match.annual_std_hours      || 4.0;
-    // Confidence: exact vs fuzzy
-    conf = match.equipment_type.toLowerCase() === raw.type.toLowerCase() ? 'exact' : 'strong';
+    conf = match.equipment_type.toLowerCase() === (raw.type||'').toLowerCase() ? 'exact' : 'strong';
   } else {
-    // Partial match attempt
-    const partial = EQUIPMASTER.find(e =>
-      e.equipment_type.toLowerCase().split(' ').some(w => raw.type.toLowerCase().includes(w) && w.length > 3)
-    );
-    if (partial) { equipmaster = partial.equipment_type; category = partial.category; qtrHrs = partial.quarterly_std_hours||1; annHrs = partial.annual_std_hours||4; conf = 'review'; }
+    // Partial match — scan for word overlap
+    const words = (raw.type||'').toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const partial = words.length
+      ? EQUIPMASTER.find(e => words.some(w => e.equipment_type.toLowerCase().includes(w)))
+      : null;
+    if (partial) {
+      equipmaster = partial.equipment_type; category = partial.category;
+      qtrHrs = partial.quarterly_std_hours||1; annHrs = partial.annual_std_hours||4; conf = 'review';
+    } else {
+      // Unknown — use safe defaults so draft still generates cleanly
+      equipmaster = null; category = 'Other'; qtrHrs = 1.0; annHrs = 4.0; conf = 'unknown';
+    }
   }
   const n = { ...raw, equipmaster, conf, category, qtrHrs, annHrs, frequency: S.frequency };
   n.annual_price = _calcPrice(n);
@@ -534,7 +661,7 @@ function _renderNormTable() {
     <table class="table" id="norm-table">
       <thead><tr>
         <th>Type</th><th>Matched As</th><th>Conf</th><th>Cat</th>
-        <th>Qty</th><th>Qtly Hrs</th><th>Ann Hrs</th><th>Price/yr</th>
+        <th>Qty</th><th>Qtly Hrs</th><th>Ann Hrs</th>
         <th style="width:32px"></th>
       </tr></thead>
       <tbody>${S.normalized.map((n,i) => `<tr class="${n.conf==='unknown'?'row-review':''}">
@@ -548,11 +675,10 @@ function _renderNormTable() {
         <td><input class="norm-inp" type="number" data-i="${i}" data-f="qty" value="${n.qty||1}" min="1" style="width:50px"></td>
         <td><input class="norm-inp" type="number" step="0.25" data-i="${i}" data-f="qtrHrs" value="${n.qtrHrs||''}" style="width:55px"></td>
         <td><input class="norm-inp" type="number" step="0.25" data-i="${i}" data-f="annHrs" value="${n.annHrs||''}" style="width:55px"></td>
-        <td><input class="norm-inp" type="number" step="10" data-i="${i}" data-f="annual_price" value="${n.annual_price||0}" style="width:80px"></td>
         <td><button class="btn btn-xs btn-danger norm-del" data-i="${i}">✕</button></td>
       </tr>`).join('')}</tbody>
-      <tfoot><tr><td colspan="7" style="text-align:right;font-weight:700">Total Annual</td>
-        <td style="font-weight:700">${formatCurrency(total)}</td><td></td></tr></tfoot>
+      <tfoot><tr><td colspan="6" style="text-align:right;font-weight:700">Total Annual (estimated)</td>
+        <td style="font-weight:700">${formatCurrency(total)}</td></tr></tfoot>
     </table>
   </div>`;
 }
@@ -680,17 +806,32 @@ async function _saveProposal(exportPdf) {
   const num      = 'P-' + String(Date.now()).slice(-5);
 
   // Build scope_items from normalized
-  const scopeItems = S.normalized.map(n => ({
-    equipment_id:   null,
-    tag:            n.tag || n.type,
-    equipment_type: n.equipmaster || n.type,
-    frequency:      n.frequency || S.frequency,
-    annual_price:   Number(n.annual_price) || 0,
-    qty:            Number(n.qty) || 1,
-    category:       n.category || 'Other',
-    confidence:     n.conf,
-    scope_lines:    getScopeText(n.equipmaster || n.type, n.frequency || S.frequency),
-  }));
+  const scopeItems = [
+    // Equipment-based scope
+    ...S.normalized.map(n => ({
+      equipment_id:   null,
+      tag:            n.tag || '',
+      equipment_type: n.equipmaster || n.type || 'Unknown Equipment',
+      frequency:      n.frequency || S.frequency,
+      annual_price:   Number(n.annual_price) || 0,
+      qty:            Number(n.qty) || 1,
+      category:       n.category || 'Other',
+      confidence:     n.conf,
+      scope_lines:    getScopeText(n.equipmaster || n.type, n.frequency || S.frequency),
+    })),
+    // RFP / Program scope items (no pricing — included in annual total)
+    ...S.rfpScope.filter(r => !r._excluded).map(r => ({
+      equipment_id:   null,
+      tag:            '',
+      equipment_type: r.label,
+      frequency:      S.frequency,
+      annual_price:   0,
+      qty:            1,
+      category:       'Program Scope',
+      confidence:     'rfp',
+      scope_lines:    [r.detail],
+    })),
+  ];
 
   // Raw intake stored for audit trail
   const rawIntake = {

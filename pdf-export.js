@@ -289,10 +289,22 @@ export function generateProposalPDFEnhanced(proposal, building, coverImageDataUr
   let coverBottom = 58;
   if (coverImageDataUrl) {
     try {
-      const imgType = coverImageDataUrl.match(/data:image\/(\w+)/)?.[1]?.toUpperCase() || 'JPEG';
-      doc.addImage(coverImageDataUrl, imgType, 0, 55, pw, 75, undefined, 'FAST');
-      coverBottom = 135;
-    } catch {}
+      const imgType = coverImageDataUrl.match(/data:\/\/image\/(\w+)/)?.[1]?.toUpperCase() ||
+                      coverImageDataUrl.match(/data:image\/(\w+)/)?.[1]?.toUpperCase() || 'JPEG';
+      // Get natural dimensions to preserve aspect ratio
+      const tmpImg = new Image();
+      tmpImg.src = coverImageDataUrl;
+      const natW = tmpImg.naturalWidth  || 1600;
+      const natH = tmpImg.naturalHeight || 900;
+      const maxW = pw;       // full page width in mm
+      const maxH = 90;       // max height allowed for cover image
+      const ratio = Math.min(maxW / natW, maxH / natH);
+      const imgW  = natW * ratio;
+      const imgH  = natH * ratio;
+      const imgX  = (pw - imgW) / 2;   // centered horizontally
+      doc.addImage(coverImageDataUrl, imgType, imgX, 55, imgW, imgH, undefined, 'FAST');
+      coverBottom = 55 + imgH + 6;
+    } catch { coverBottom = 58; }
   }
 
   // Proposal title block
@@ -374,7 +386,7 @@ export function generateProposalPDFEnhanced(proposal, building, coverImageDataUr
       doc.setFont('helvetica','bold'); doc.setFontSize(9.5);
       const itemLabel = [item.tag, item.equipment_type].filter(Boolean).join(' — ');
       doc.text(itemLabel, ml + 3, y);
-      if (item.annual_price) doc.text(formatCurrency(item.annual_price) + ' / yr', mr, y, { align: 'right' });
+      // Per-item pricing omitted — totals shown on pricing page only
       if (item.qty > 1) doc.text(`×${item.qty}`, mr - 35, y);
       y += 7;
 
@@ -400,7 +412,7 @@ export function generateProposalPDFEnhanced(proposal, building, coverImageDataUr
   doc.setFillColor(15,25,45); doc.rect(ml, y-5, mr-ml, 7, 'F');
   doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(8);
   doc.text('Tag', ml+2, y); doc.text('Equipment Type', ml+22, y);
-  doc.text('Qty', ml+105, y); doc.text('Frequency', ml+118, y); doc.text('Annual', mr, y, {align:'right'});
+  doc.text('Qty', ml+120, y); doc.text('Frequency', ml+135, y);
   doc.setTextColor(0); y += 7;
 
   let subtot = 0;
@@ -409,10 +421,9 @@ export function generateProposalPDFEnhanced(proposal, building, coverImageDataUr
     if (idx % 2 === 0) { doc.setFillColor(248,250,255); doc.rect(ml, y-4, mr-ml, 6, 'F'); }
     doc.setFont('helvetica','normal'); doc.setFontSize(8);
     doc.text(item.tag || '—', ml+2, y);
-    doc.text((item.equipment_type||'').slice(0, 40), ml+22, y);
-    doc.text(String(item.qty||1), ml+107, y);
-    doc.text(item.frequency || proposal.frequency || '—', ml+118, y);
-    doc.text(formatCurrency(item.annual_price), mr, y, {align:'right'});
+    doc.text((item.equipment_type||'').slice(0, 50), ml+22, y);
+    doc.text(String(item.qty||1), ml+122, y);
+    doc.text(item.frequency || proposal.frequency || '—', ml+135, y);
     subtot += Number(item.annual_price || 0);
     y += 6;
   });
