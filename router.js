@@ -41,7 +41,8 @@ function match(pattern, path) {
 }
 
 async function dispatch() {
-  const hash = window.location.hash || '#/';
+  const rawHash = window.location.hash || '#/';
+  const hash = rawHash.split('?')[0];  // strip query string before route matching
   const result = parse(hash);
   const content = document.getElementById('content');
   if (!content) return;
