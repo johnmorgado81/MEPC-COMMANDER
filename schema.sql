@@ -393,3 +393,18 @@ insert into pricing_matrix (equipment_type, service_frequency, sell_price, overh
   ('Exhaust Fan',          'annual',      125, 30, 20)
 on conflict (equipment_type, service_frequency) do nothing;
 */
+
+-- =============================================================
+-- PROPOSAL WIZARD MIGRATION (run these if upgrading from v1.0)
+-- Safe to run multiple times — uses IF NOT EXISTS guards
+-- =============================================================
+
+do $$ begin
+  alter table proposals add column if not exists cover_image_url text;
+  alter table proposals add column if not exists raw_intake jsonb;
+  alter table proposals add column if not exists is_draft boolean default true;
+exception when others then null; end $$;
+
+comment on column proposals.cover_image_url is 'URL or null — cover image stored externally if using Supabase Storage';
+comment on column proposals.raw_intake is 'Raw extracted data from OCR, file parse, and drawing scan';
+comment on column proposals.is_draft is 'True while proposal is in wizard/draft state';

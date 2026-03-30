@@ -8,6 +8,7 @@ import { formatCurrency, formatDate, statusBadge, today, addDays, pad } from './
 import { openModal, closeModal, confirm, notify, makeSortable, spinner, emptyState } from './ui.js';
 import { navigate }        from './router.js';
 import { getStdHours }     from './equipmaster.js';
+import { ProposalWizard }  from './proposal-wizard.js';
 
 export const Proposals = {
 
@@ -60,6 +61,8 @@ export const Proposals = {
 
   async create(container) {
     setPageTitle('New PM Proposal', [{ label: 'Proposals', href: '#/proposals' }, { label: 'New' }]);
+    await ProposalWizard.init(container);
+    return; // rest of method replaced by wizard
     let buildings = [];
     try { buildings = await Buildings.getAll(); } catch {}
 

@@ -261,3 +261,245 @@ function defaultTerms() {
     `Payment terms: Net 30 from invoice date. Overdue balances are subject to 2% monthly interest. ` +
     `All prices are in Canadian Dollars and exclusive of applicable taxes.`;
 }
+
+// ── Enhanced multi-page Proposal PDF (used by proposal-wizard) ─────────────────
+export function generateProposalPDFEnhanced(proposal, building, coverImageDataUrl) {
+  const jsPDF = getjsPDF();
+  const doc   = new jsPDF({ unit: 'mm', format: 'letter' });
+  const co    = CONFIG.COMPANY;
+  const pw    = 215.9, ph = 279.4, ml = 14, mr = pw - ml;
+
+  // ─── COVER PAGE ─────────────────────────────────────────────────────────────
+  // Dark header band
+  doc.setFillColor(15, 25, 45);
+  doc.rect(0, 0, pw, 55, 'F');
+  doc.setFillColor(59, 130, 246);
+  doc.rect(0, 52, pw, 3, 'F');
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(22); doc.setFont('helvetica', 'bold');
+  doc.text(co.name, ml, 22);
+  doc.setFontSize(10); doc.setFont('helvetica', 'normal');
+  doc.text(`${co.phone}  ·  ${co.email}  ·  ${co.website}`, ml, 30);
+  doc.setFontSize(9);
+  doc.text(`${co.address}, ${co.city}, ${co.province}  ·  GST ${co.gst}`, ml, 37);
+  doc.setTextColor(0);
+
+  // Cover image
+  let coverBottom = 58;
+  if (coverImageDataUrl) {
+    try {
+      const imgType = coverImageDataUrl.match(/data:image\/(\w+)/)?.[1]?.toUpperCase() || 'JPEG';
+      doc.addImage(coverImageDataUrl, imgType, 0, 55, pw, 75, undefined, 'FAST');
+      coverBottom = 135;
+    } catch {}
+  }
+
+  // Proposal title block
+  let cy = coverBottom + 10;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(18);
+  doc.text('PREVENTIVE MAINTENANCE', ml, cy); cy += 9;
+  doc.text('PROPOSAL', ml, cy); cy += 14;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+
+  const bldName = building.name || building.client_name || 'Draft';
+  const cliName = building.client_name || '';
+  const cliCo   = building.client_company || '';
+  const addr    = [building.address, building.city, building.province].filter(Boolean).join(', ');
+
+  doc.setFillColor(240, 245, 255);
+  doc.roundedRect(ml, cy - 5, mr - ml, 50, 2, 2, 'F');
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9); cy += 2;
+  doc.text('PREPARED FOR:', ml + 4, cy); cy += 6;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+  doc.text(cliName || bldName, ml + 4, cy); cy += 6;
+  if (cliCo) { doc.setFontSize(9); doc.text(cliCo, ml + 4, cy); cy += 5; }
+  doc.setFontSize(9);
+  if (addr) { doc.text(addr, ml + 4, cy); cy += 5; }
+  if (building.client_email) { doc.text(building.client_email, ml + 4, cy); cy += 5; }
+  if (building.client_phone) { doc.text(building.client_phone, ml + 4, cy); }
+
+  // Right column on cover
+  const rx = 130;
+  let ry = coverBottom + 10;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+  [
+    ['Proposal #', proposal.proposal_number || '—'],
+    ['Date', formatDate(proposal.created_date)],
+    ['Valid Until', formatDate(proposal.valid_until)],
+    ['Frequency', (proposal.frequency||'').charAt(0).toUpperCase()+(proposal.frequency||'').slice(1)],
+    ['Annual Value', formatCurrency(proposal.annual_value)],
+    ['Monthly Billing', formatCurrency(proposal.monthly_value)],
+  ].forEach(([k, v]) => {
+    doc.setFont('helvetica', 'bold'); doc.text(k + ':', rx, ry);
+    doc.setFont('helvetica', 'normal'); doc.text(v, rx + 30, ry);
+    ry += 7;
+  });
+
+  addFooter(doc, 1);
+
+  // ─── SCOPE PAGES (grouped by category) ─────────────────────────────────────
+  const items = proposal.scope_items || [];
+  const grouped = {};
+  items.forEach(item => {
+    const cat = item.category || 'Other';
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(item);
+  });
+
+  const CAT_ORDER = ['HVAC','Hydronic','Plumbing','Drainage','Controls','Backup & Fuel',
+    'Chemical Treatment','Pool','Irrigation','Compressed Air','Radiant / Snowmelt',
+    'Meters & Gauges','Valves','Other'];
+  const cats = CAT_ORDER.filter(c => grouped[c]).concat(Object.keys(grouped).filter(c => !CAT_ORDER.includes(c)));
+
+  doc.addPage();
+  let y = addHeader(doc, 'SCOPE OF WORK', `#${proposal.proposal_number}`);
+  let page = 2;
+
+  const checkPage = (need = 20) => {
+    if (y + need > 270) { addFooter(doc, page); doc.addPage(); page++; y = addHeader(doc, 'SCOPE OF WORK (cont.)', `#${proposal.proposal_number}`); }
+  };
+
+  cats.forEach(cat => {
+    checkPage(18);
+    doc.setFillColor(15, 25, 45); doc.rect(ml, y - 5, mr - ml, 8, 'F');
+    doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(10);
+    doc.text(cat.toUpperCase(), ml + 3, y); doc.setTextColor(0);
+    y += 8;
+
+    grouped[cat].forEach(item => {
+      checkPage(15);
+      doc.setFillColor(245, 248, 255);
+      doc.rect(ml, y - 4, mr - ml, 8, 'F');
+      doc.setFont('helvetica','bold'); doc.setFontSize(9.5);
+      const itemLabel = [item.tag, item.equipment_type].filter(Boolean).join(' — ');
+      doc.text(itemLabel, ml + 3, y);
+      if (item.annual_price) doc.text(formatCurrency(item.annual_price) + ' / yr', mr, y, { align: 'right' });
+      if (item.qty > 1) doc.text(`×${item.qty}`, mr - 35, y);
+      y += 7;
+
+      doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+      const lines = item.scope_lines || [];
+      lines.forEach(line => {
+        checkPage(6);
+        const wrapped = doc.splitTextToSize(`• ${line}`, mr - ml - 6);
+        doc.text(wrapped, ml + 5, y);
+        y += wrapped.length * 4.2;
+      });
+      y += 3;
+    });
+    y += 4;
+  });
+
+  // Equipment summary table
+  checkPage(30);
+  addFooter(doc, page);
+  doc.addPage(); page++;
+  y = addHeader(doc, 'EQUIPMENT SUMMARY', `#${proposal.proposal_number}`);
+
+  doc.setFillColor(15,25,45); doc.rect(ml, y-5, mr-ml, 7, 'F');
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(8);
+  doc.text('Tag', ml+2, y); doc.text('Equipment Type', ml+22, y);
+  doc.text('Qty', ml+105, y); doc.text('Frequency', ml+118, y); doc.text('Annual', mr, y, {align:'right'});
+  doc.setTextColor(0); y += 7;
+
+  let subtot = 0;
+  items.forEach((item, idx) => {
+    checkPage(7);
+    if (idx % 2 === 0) { doc.setFillColor(248,250,255); doc.rect(ml, y-4, mr-ml, 6, 'F'); }
+    doc.setFont('helvetica','normal'); doc.setFontSize(8);
+    doc.text(item.tag || '—', ml+2, y);
+    doc.text((item.equipment_type||'').slice(0, 40), ml+22, y);
+    doc.text(String(item.qty||1), ml+107, y);
+    doc.text(item.frequency || proposal.frequency || '—', ml+118, y);
+    doc.text(formatCurrency(item.annual_price), mr, y, {align:'right'});
+    subtot += Number(item.annual_price || 0);
+    y += 6;
+  });
+  y += 4;
+  doc.setDrawColor(150); doc.line(ml, y, mr, y); y += 5;
+
+  // ─── PRICING PAGE ────────────────────────────────────────────────────────────
+  checkPage(60);
+  doc.setFont('helvetica','bold'); doc.setFontSize(11);
+  doc.text('Pricing Summary', ml, y); y += 8;
+  const tax = subtot * CONFIG.TAX_RATE;
+  [
+    ['Subtotal — Annual Contract', formatCurrency(subtot), false],
+    [`GST (${(CONFIG.TAX_RATE*100).toFixed(0)}%)`, formatCurrency(tax), false],
+    ['Total Annual (incl. tax)', formatCurrency(subtot + tax), true],
+    ['Monthly Billing (incl. tax)', formatCurrency((subtot + tax)/12), true],
+  ].forEach(([label, val, bold]) => {
+    doc.setFont('helvetica', bold?'bold':'normal');
+    doc.setFontSize(bold ? 11 : 9);
+    doc.text(label, ml, y);
+    doc.text(val, mr, y, {align:'right'});
+    y += bold ? 8 : 6;
+  });
+
+  // Inclusions / exclusions
+  y += 8;
+  const incl = [
+    'All labour and materials required for routine preventive maintenance tasks',
+    'Shop supplies (vacuum, cleaning supplies, lubricants)',
+    'Scheduled task reports delivered within 30 days of each visit',
+    'Annual performance review with property manager',
+    '24-hour emergency line access (604-298-8383)',
+  ];
+  const excl = [
+    'Replacement parts and components',
+    'Repairs beyond routine maintenance scope',
+    'Emergency or after-hours labour (billed at Schedule D rates)',
+    'New equipment installation or commissioning',
+  ];
+  checkPage(40);
+  doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.text('Inclusions', ml, y); y += 5;
+  doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+  incl.forEach(l => { doc.text(`• ${l}`, ml+4, y); y += 5; });
+  y += 3;
+  doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.text('Exclusions', ml, y); y += 5;
+  doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+  excl.forEach(l => { doc.text(`• ${l}`, ml+4, y); y += 5; });
+
+  // Notes
+  if (proposal.notes) {
+    y += 5; checkPage(20);
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.text('Special Notes', ml, y); y += 5;
+    doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+    doc.text(doc.splitTextToSize(proposal.notes, mr-ml), ml, y);
+    y += doc.splitTextToSize(proposal.notes, mr-ml).length * 4.5;
+  }
+
+  // ─── TERMS & SIGNATURE PAGE ──────────────────────────────────────────────────
+  addFooter(doc, page);
+  doc.addPage(); page++;
+  y = addHeader(doc, 'TERMS & ACCEPTANCE', `#${proposal.proposal_number}`);
+
+  doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+  const terms = defaultTerms();
+  const termLines = doc.splitTextToSize(terms, mr - ml);
+  doc.text(termLines, ml, y); y += termLines.length * 4.3 + 10;
+
+  doc.setFont('helvetica','bold'); doc.setFontSize(10);
+  doc.text('Acceptance', ml, y); y += 6;
+  doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+  doc.text('By signing below, the Customer accepts the terms and scope of this proposal.', ml, y); y += 12;
+
+  const sigCol = (mr - ml) / 3;
+  ['Authorized Signature (Customer)', 'Print Name & Title', 'Date'].forEach((lbl, i) => {
+    const x = ml + i * sigCol;
+    doc.line(x, y, x + sigCol - 8, y);
+    doc.text(lbl, x, y + 4);
+  });
+  y += 16;
+
+  ['Authorized Signature (Contractor)', 'Print Name & Title', 'Date'].forEach((lbl, i) => {
+    const x = ml + i * sigCol;
+    doc.line(x, y, x + sigCol - 8, y);
+    doc.text(lbl, x, y + 4);
+  });
+
+  addFooter(doc, page);
+
+  doc.save(`Proposal-${proposal.proposal_number || 'Draft'}.pdf`);
+}
