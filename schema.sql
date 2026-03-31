@@ -506,3 +506,56 @@ do $$ begin
   create trigger equipment_manufacturers_no_upd before update on equipment_manufacturers
     for each row execute function set_updated_at();
 exception when duplicate_object then null; end $$;
+
+-- =============================================================
+-- PM QUOTES TABLE (PM Quote MVP)
+-- =============================================================
+create table if not exists pm_quotes (
+  id                    uuid primary key default gen_random_uuid(),
+  quote_number          text unique,
+  status                text default 'draft',
+  -- Customer / Building
+  management_company    text,
+  contact_name          text,
+  contact_email         text,
+  contact_phone         text,
+  concierge_name        text,
+  concierge_phone       text,
+  concierge_email       text,
+  concierge_coffee      text,
+  building_name         text,
+  strata_number         text,
+  address               text,
+  city                  text,
+  province              text default 'BC',
+  postal_code           text,
+  building_type         text,
+  notes                 text,
+  building_id           uuid references buildings(id) on delete set null,
+  cover_image_data      text,
+  -- Contract
+  frequency             text default 'quarterly',
+  contract_start        date,
+  valid_until           date,
+  payment_terms         text default 'Net 30',
+  -- Data
+  equipment_items       jsonb default '[]',
+  subcontractors        jsonb default '{}',
+  market_units          jsonb default '{}',
+  -- Pricing
+  pm_labour_annual      numeric(10,2) default 0,
+  sub_sell_annual       numeric(10,2) default 0,
+  market_unit_annual    numeric(10,2) default 0,
+  common_property_total numeric(10,2) default 0,
+  -- Timestamps
+  created_at            timestamptz default now(),
+  updated_at            timestamptz default now()
+);
+
+create index if not exists pm_quotes_status_idx on pm_quotes(status);
+create index if not exists pm_quotes_created_idx on pm_quotes(created_at);
+
+do $$ begin
+  create trigger pm_quotes_updated_at before update on pm_quotes
+    for each row execute function set_updated_at();
+exception when duplicate_object then null; end $$;

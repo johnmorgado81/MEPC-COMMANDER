@@ -130,7 +130,7 @@ export const Proposals = {
           </div>
         </div>
         <div class="toolbar" style="margin-top:1rem">
-          <button class="btn btn-secondary" onclick="history.back()">Cancel</button>
+          <button class="btn btn-secondary" onclick="navigate('/proposals')">← Back to Proposals</button>
           <button class="btn btn-primary" id="prop-save-btn">Save Proposal</button>
         </div>
       </div>
@@ -351,7 +351,8 @@ export const Proposals = {
 
       container.innerHTML = `<div class="page-wrap">
         <div class="toolbar">
-          <div class="status-wrap">${statusBadge(p.status)}</div>
+          <button class="btn btn-secondary btn-sm" onclick="navigate('/proposals')">← All Proposals</button>
+          ${b?.id ? `<button class="btn btn-secondary btn-sm" onclick="navigate('/buildings/${b.id}')">${b.name}</button>` : ''}
           <div class="toolbar-right">
             <select id="prop-status-sel" class="input input-sm" style="max-width:140px">
               ${CONFIG.PROPOSAL_STATUSES.map(s => `<option ${s === p.status ? 'selected' : ''}>${s}</option>`).join('')}
@@ -365,7 +366,7 @@ export const Proposals = {
           <div class="card-header"><h3>Proposal Details</h3></div>
           <div class="card-body detail-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
             ${df2('Proposal #', p.proposal_number)} ${df2('Status', statusBadge(p.status), true)}
-            ${df2('Building', b?.name)} ${df2('Client', b?.client_name)}
+            ${df2('Building', b?.id ? `<a href="#/buildings/${b.id}">${b.name}</a>` : (b?.name||'—'), true)} ${df2('Client', b?.client_name)}
             ${df2('Frequency', p.frequency)} ${df2('Visits / Year', p.visits_per_year)}
             ${df2('Created', formatDate(p.created_date))} ${df2('Valid Until', formatDate(p.valid_until))}
             ${df2('Annual Value', formatCurrency(p.annual_value))} ${df2('Monthly Billing', formatCurrency(p.monthly_value))}
