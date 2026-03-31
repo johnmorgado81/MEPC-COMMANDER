@@ -1,38 +1,31 @@
 // js/app.js — application bootstrap
+// BRANCH: PM Quote MVP — full platform modules disabled until further notice
 import { CONFIG, syncConfigFromEquipmaster } from './config.js';
 import { initDB }     from './db.js';
 import { register, start, navigate } from './router.js';
 import { Auth, showAuthScreen, hideAuthScreen, renderUserBadge } from './auth.js';
 
-// Lazy-load all modules (reduces initial parse time)
+// Lazy-load PM-relevant modules only
+// Full-platform modules (pm-records, quotes, reporting, dispatch-ocr, document-parser)
+// are intentionally excluded from this branch.
 const load = {
   Dashboard:   () => import('./dashboard.js').then(m => m.Dashboard),
   Buildings:   () => import('./buildings.js').then(m => m.Buildings),
   Equipment:   () => import('./equipment.js').then(m => m.Equipment),
   Proposals:   () => import('./proposals.js').then(m => m.Proposals),
-  PMRecords:   () => import('./pm-records.js').then(m => m.PMRecords),
-  Quotes:      () => import('./quotes.js').then(m => m.Quotes),
   Pricing:     () => import('./pricing.js').then(m => m.Pricing),
-  Reporting:   () => import('./reporting.js').then(m => m.renderReporting),
-  DocParser:   () => import('./document-parser.js').then(m => m.renderDocumentParser),
   MaintItems:  () => import('./maintenance-items.js').then(m => m.MaintItems),
   Settings:    () => import('./settings.js').then(m => m.Settings),
-  DispatchOCR: () => import('./dispatch-ocr.js').then(m => m.DispatchOCR),
 };
 
 const NAV_ITEMS = [
-  { route: '/',                label: 'Dashboard',        icon: '◼' },
-  { route: '/buildings',       label: 'Buildings',        icon: '▣' },
-  { route: '/equipment',       label: 'Equipment',        icon: '⚙' },
-  { route: '/maint-items',     label: 'Items Library',    icon: '☰' },
-  { route: '/proposals',       label: 'PM Proposals',     icon: '📋' },
-  { route: '/pm-records',      label: 'Service Records',  icon: '🔧' },
-  { route: '/quotes',          label: 'Quote Funnel',     icon: '💲' },
-  { route: '/pricing',         label: 'Pricing Matrix',   icon: '🏷' },
-  { route: '/reporting',       label: 'Reporting',        icon: '📊' },
-  { route: '/dispatch-ocr',    label: 'Dispatch OCR',     icon: '📷' },
-  { route: '/document-parser', label: 'Doc Parser',       icon: '📂' },
-  { route: '/settings',        label: 'Settings',         icon: '⚙' },
+  { route: '/',            label: 'Dashboard',    icon: '◼' },
+  { route: '/buildings',   label: 'Buildings',    icon: '▣' },
+  { route: '/equipment',   label: 'Equipment',    icon: '⚙' },
+  { route: '/maint-items', label: 'Items Library',icon: '☰' },
+  { route: '/proposals',   label: 'PM Proposals', icon: '📋' },
+  { route: '/pricing',     label: 'Pricing',      icon: '🏷' },
+  { route: '/settings',    label: 'Settings',     icon: '⚙' },
 ];
 
 // ─── Active nav highlight ───────────────────────────────────────────────────
@@ -65,11 +58,8 @@ function renderSidebarLogo() {
     <div class="logo-sub">${CONFIG.COMPANY.name}</div>`;
 }
 
-// ─── Route registration ─────────────────────────────────────────────────────
+// ─── Route registration — PM Quote MVP only ─────────────────────────────────
 function registerRoutes() {
-  const c = (id) => document.getElementById(id) || document.getElementById('content');
-  const content = () => document.getElementById('content');
-
   register('/', async (_, el) => { const M = await load.Dashboard(); M.init(el); });
   register('/buildings', async (_, el) => { const M = await load.Buildings(); M.init(el); });
   register('/buildings/:id', async (p, el) => { const M = await load.Buildings(); M.detail(p.id, el); });
@@ -79,16 +69,7 @@ function registerRoutes() {
   register('/proposals', async (_, el) => { const M = await load.Proposals(); M.init(el); });
   register('/proposals/new', async (_, el) => { const M = await load.Proposals(); M.create(el); });
   register('/proposals/:id', async (p, el) => { const M = await load.Proposals(); M.detail(p.id, el); });
-  register('/pm-records', async (_, el) => { const M = await load.PMRecords(); M.init(el); });
-  register('/pm-records/new', async (_, el) => { const M = await load.PMRecords(); M.create(el); });
-  register('/pm-records/:id', async (p, el) => { const M = await load.PMRecords(); M.detail(p.id, el); });
-  register('/quotes', async (_, el) => { const M = await load.Quotes(); M.init(el); });
-  register('/quotes/new', async (_, el) => { const M = await load.Quotes(); M.create(el); });
-  register('/quotes/:id', async (p, el) => { const M = await load.Quotes(); M.detail(p.id, el); });
   register('/pricing', async (_, el) => { const M = await load.Pricing(); M.init(el); });
-  register('/reporting', async (_, el) => { const fn = await load.Reporting(); fn(el); });
-  register('/dispatch-ocr', async (_, el) => { const M = await load.DispatchOCR(); M.init(el); });
-  register('/document-parser', async (_, el) => { const fn = await load.DocParser(); fn(el); });
   register('/settings', async (_, el) => { const M = await load.Settings(); M.init(el); });
 }
 
@@ -109,7 +90,6 @@ function wireTopbar() {
 // ─── Auth guard + boot ──────────────────────────────────────────────────────
 async function boot() {
   try { initDB(); } catch(e) { console.warn("DB init failed:", e.message); }
-  // Sync CONFIG lists from EQUIPMASTER dataset
   try {
     const { EQUIPMASTER } = await import('./equipmaster.js');
     syncConfigFromEquipmaster(EQUIPMASTER);
@@ -119,7 +99,6 @@ async function boot() {
   registerRoutes();
   wireTopbar();
 
-  // Listen for auth state changes (sign-in from magic link click)
   let _routerStarted = false;
   Auth.onAuthChange((event, session) => {
     console.log('[auth] onAuthChange:', event, session ? 'session' : 'no session');
@@ -137,21 +116,17 @@ async function boot() {
     }
   });
 
-  // Check existing session before starting router
   const session = await Auth.getSession();
   console.log('[auth] boot session:', session ? 'found' : 'none');
 
   if (session) {
-    // Valid session — hide auth screen and start app
     hideAuthScreen();
     renderUserBadge(session.user);
     start();
     syncNav();
     window.addEventListener('hashchange', syncNav);
   } else {
-    // No session — show auth screen, do NOT start router yet
     showAuthScreen();
-    // onAuthChange above will call start() when SIGNED_IN fires
   }
 }
 

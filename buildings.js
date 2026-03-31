@@ -1,4 +1,4 @@
-// js/modules/buildings.js
+// buildings.js — PM Quote MVP
 import { setPageTitle }   from './app.js';
 import { Buildings as DB, Equipment } from './db.js';
 import { CONFIG }         from './config.js';
@@ -18,19 +18,12 @@ export const Buildings = {
           <button class="btn btn-primary" id="bld-add">+ Add Building</button>
         </div>
       </div>
-      <div class="card">
-        <div id="bld-table-wrap">${spinner()}</div>
-      </div>
+      <div class="card"><div id="bld-table-wrap">${spinner()}</div></div>
     </div>`;
-
     await this.loadTable();
-
-    const addBtn = document.getElementById('bld-add'); if (addBtn) addBtn.onclick = () => this.openForm();
-    const searchEl = document.getElementById('bld-search'); if (searchEl) searchEl.oninput = (e) => {
-      const tbl = document.querySelector('#bld-table-wrap table');
-      if (tbl) filterTable(e.target, tbl);
-    };
-    const exportBtn = document.getElementById('bld-export'); if (exportBtn) exportBtn.onclick = () => this.exportData();
+    document.getElementById('bld-add').onclick = () => this.openForm();
+    document.getElementById('bld-search').oninput = e => { const t = document.querySelector('#bld-table-wrap table'); if (t) filterTable(e.target, t); };
+    document.getElementById('bld-export').onclick = () => this.exportData();
   },
 
   async loadTable() {
@@ -41,16 +34,13 @@ export const Buildings = {
       if (!rows.length) { wrap.innerHTML = emptyState('No buildings yet.', '<button class="btn btn-primary" onclick="document.getElementById(\'bld-add\').click()">Add First Building</button>'); return; }
       wrap.innerHTML = `<table class="table" id="bld-table">
         <thead><tr>
-          <th data-sort="name">Name</th>
-          <th data-sort="client">Client</th>
-          <th data-sort="type">Type</th>
-          <th data-sort="city">City</th>
-          <th data-sort="status">Status</th>
-          <th></th>
+          <th>Name</th><th>Strata #</th><th>Management Co.</th>
+          <th>Type</th><th>City</th><th>Status</th><th></th>
         </tr></thead>
         <tbody>${rows.map(b => `<tr>
           <td><a href="#/buildings/${b.id}" class="link-strong">${b.name}</a></td>
-          <td>${b.client_name || '—'}</td>
+          <td>${b.strata_number || '—'}</td>
+          <td>${b.client_company || b.client_name || '—'}</td>
           <td>${b.building_type || '—'}</td>
           <td>${b.city || '—'}</td>
           <td>${statusBadge(b.status)}</td>
@@ -64,9 +54,7 @@ export const Buildings = {
       makeSortable(document.getElementById('bld-table'));
       wrap.querySelectorAll('[data-edit]').forEach(btn => btn.onclick = () => this.openForm(btn.dataset.edit));
       wrap.querySelectorAll('[data-delete]').forEach(btn => btn.onclick = () => this.deleteBuilding(btn.dataset.delete));
-    } catch (e) {
-      wrap.innerHTML = `<div class="error-state">${e.message}</div>`;
-    }
+    } catch (e) { wrap.innerHTML = `<div class="error-state">${e.message}</div>`; }
   },
 
   async detail(id, container) {
@@ -74,29 +62,37 @@ export const Buildings = {
     try {
       const b = await DB.getById(id);
       setPageTitle(b.name, [{ label: 'Buildings', href: '#/buildings' }, { label: b.name }]);
-
       const equip = b.equipment || [];
       const due = equip.filter(e => e.next_service_date && (isOverdue(e.next_service_date) || isDueSoon(e.next_service_date, 30)));
 
       container.innerHTML = `<div class="page-wrap">
         <div class="detail-grid">
           <div class="card detail-info">
-            <div class="card-header"><h3>Building Info</h3>
-              <button class="btn btn-sm btn-secondary" id="edit-bld-btn">Edit</button>
-            </div>
+            <div class="card-header"><h3>Building Info</h3><button class="btn btn-sm btn-secondary" id="edit-bld-btn">Edit</button></div>
             <div class="card-body detail-fields">
+              <div class="detail-section-label">Building</div>
               ${field('Building Name', b.name)}
-              ${field('Client Name', b.client_name)}
-              ${field('Company', b.client_company)}
+              ${field('Strata Plan #', b.strata_number)}
+              ${field('Building Type', b.building_type)}
+              ${field('Address', [b.address, b.city, b.province, b.postal_code].filter(Boolean).join(', '))}
+              ${field('Status', statusBadge(b.status), true)}
+
+              <div class="detail-section-label" style="margin-top:.75rem">Management / Client</div>
+              ${field('Management Company', b.client_company)}
+              ${field('Primary Contact', b.client_name)}
               ${field('Email', b.client_email)}
               ${field('Phone', b.client_phone)}
-              ${field('Address', b.address)}
-              ${field('City', b.city || 'Vancouver')}
-              ${field('Type', b.building_type)}
-              ${field('Floors', b.floors)}
-              ${field('Year Built', b.year_built)}
-              ${field('Area (sqft)', b.gross_area_sqft)}
-              ${field('Status', statusBadge(b.status), true)}
+
+              <div class="detail-section-label" style="margin-top:.75rem">Concierge</div>
+              ${field('Name', b.concierge_name)}
+              ${field('Phone', b.concierge_phone)}
+              ${field('Email', b.concierge_email)}
+              ${field('Coffee Order', b.concierge_coffee)}
+
+              ${(b.building_notes || b.notes) ? `
+                <div class="detail-section-label" style="margin-top:.75rem">Notes</div>
+                ${field('Building Notes', b.building_notes || b.notes)}
+              ` : ''}
             </div>
           </div>
 
@@ -108,16 +104,14 @@ export const Buildings = {
                 <button class="btn btn-sm btn-primary" id="add-equip-btn">+ Add Equipment</button>
               </div>
             </div>
-            <div class="card-body" id="equip-list">
+            <div class="card-body">
               ${equip.length ? `<table class="table table-compact">
                 <thead><tr><th>Tag</th><th>Type</th><th>Make / Model</th><th>Next Service</th><th>Condition</th><th></th></tr></thead>
                 <tbody>${equip.map(e => `<tr>
                   <td><strong>${e.tag || '—'}</strong></td>
                   <td>${e.equipment_type}</td>
-                  <td>${[e.make, e.model].filter(Boolean).join(' ') || '—'}</td>
-                  <td class="${isOverdue(e.next_service_date) ? 'text-danger' : isDueSoon(e.next_service_date, 30) ? 'text-warning' : ''}">
-                    ${formatDate(e.next_service_date)}
-                  </td>
+                  <td>${[e.make || e.manufacturer, e.model].filter(Boolean).join(' ') || '—'}</td>
+                  <td class="${isOverdue(e.next_service_date) ? 'text-danger' : isDueSoon(e.next_service_date, 30) ? 'text-warning' : ''}">${formatDate(e.next_service_date)}</td>
                   <td>${statusBadge(e.condition)}</td>
                   <td><a href="#/equipment/${e.id}" class="btn btn-xs btn-secondary">View</a></td>
                 </tr>`).join('')}</tbody>
@@ -125,14 +119,11 @@ export const Buildings = {
             </div>
           </div>
         </div>
-        ${b.notes ? `<div class="card" style="margin-top:1rem"><div class="card-header"><h3>Notes</h3></div><div class="card-body"><p>${b.notes}</p></div></div>` : ''}
       </div>`;
 
       document.getElementById('edit-bld-btn').onclick = () => this.openForm(id);
       document.getElementById('add-equip-btn').onclick = () => navigate(`/equipment?building=${id}`);
-    } catch (e) {
-      container.innerHTML = `<div class="page-wrap error-state">${e.message}</div>`;
-    }
+    } catch (e) { container.innerHTML = `<div class="page-wrap error-state">${e.message}</div>`; }
   },
 
   openForm(id = null) {
@@ -140,40 +131,36 @@ export const Buildings = {
       title: id ? 'Edit Building' : 'Add Building',
       size: 'lg',
       body: `<form id="bld-form" class="form-grid">
+
+        <div class="form-section-label">Building</div>
         <div class="form-row">
           <div class="form-group">
             <label>Building Name *</label>
-            <input name="name" class="input" required>
+            <input name="name" class="input" required placeholder="e.g. The Regent — 123 Main St">
           </div>
+          <div class="form-group">
+            <label>Strata Plan #</label>
+            <input name="strata_number" class="input" placeholder="e.g. BCS1234">
+          </div>
+        </div>
+        <div class="form-row">
           <div class="form-group">
             <label>Building Type</label>
             <select name="building_type" class="input">
-              ${selectOptions(CONFIG.BUILDING_TYPES, null, null)}
+              <option value="">— Select —</option>
+              ${CONFIG.BUILDING_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select name="status" class="input">
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
             </select>
           </div>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Client Name</label>
-            <input name="client_name" class="input">
-          </div>
-          <div class="form-group">
-            <label>Client Company</label>
-            <input name="client_company" class="input">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Email</label>
-            <input name="client_email" type="email" class="input">
-          </div>
-          <div class="form-group">
-            <label>Phone</label>
-            <input name="client_phone" class="input">
-          </div>
-        </div>
         <div class="form-group full-width">
-          <label>Address</label>
+          <label>Street Address</label>
           <input name="address" class="input">
         </div>
         <div class="form-row">
@@ -190,6 +177,52 @@ export const Buildings = {
             <input name="postal_code" class="input">
           </div>
         </div>
+
+        <div class="form-section-label" style="margin-top:1rem">Management / Client</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Management Company</label>
+            <input name="client_company" class="input" placeholder="e.g. FirstService Residential">
+          </div>
+          <div class="form-group">
+            <label>Primary Contact Name</label>
+            <input name="client_name" class="input">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Primary Contact Email</label>
+            <input name="client_email" type="email" class="input">
+          </div>
+          <div class="form-group">
+            <label>Primary Contact Phone</label>
+            <input name="client_phone" class="input">
+          </div>
+        </div>
+
+        <div class="form-section-label" style="margin-top:1rem">Concierge</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Concierge Name</label>
+            <input name="concierge_name" class="input">
+          </div>
+          <div class="form-group">
+            <label>Concierge Phone</label>
+            <input name="concierge_phone" class="input">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Concierge Email</label>
+            <input name="concierge_email" type="email" class="input">
+          </div>
+          <div class="form-group">
+            <label>Coffee Order</label>
+            <input name="concierge_coffee" class="input" placeholder="e.g. Large dark roast, black">
+          </div>
+        </div>
+
+        <div class="form-section-label" style="margin-top:1rem">Additional Info</div>
         <div class="form-row">
           <div class="form-group">
             <label>Floors</label>
@@ -204,18 +237,9 @@ export const Buildings = {
             <input name="gross_area_sqft" type="number" class="input">
           </div>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Status</label>
-            <select name="status" class="input">
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
-          </div>
-        </div>
         <div class="form-group full-width">
-          <label>Notes</label>
-          <textarea name="notes" class="input" rows="3"></textarea>
+          <label>Building Notes / Access Info</label>
+          <textarea name="building_notes" class="input" rows="3" placeholder="Access codes, parking, key location, site-specific notes…"></textarea>
         </div>
       </form>`,
       footer: `<button class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
@@ -247,9 +271,7 @@ export const Buildings = {
       notify.success(id ? 'Building updated.' : 'Building added.');
       if (document.getElementById('bld-table-wrap')) await this.loadTable();
       else navigate('/buildings');
-    } catch (e) {
-      notify.error(e.message);
-    }
+    } catch (e) { notify.error(e.message); }
   },
 
   async deleteBuilding(id) {
@@ -259,17 +281,17 @@ export const Buildings = {
       await DB.delete(id);
       notify.success('Building deleted.');
       await this.loadTable();
-    } catch (e) {
-      notify.error(e.message);
-    }
+    } catch (e) { notify.error(e.message); }
   },
 
   async exportData() {
     const rows = await DB.getAll();
     exportCSV(rows.map(b => ({
-      Name: b.name, Client: b.client_name, Company: b.client_company,
+      Name: b.name, 'Strata #': b.strata_number,
+      'Mgmt Company': b.client_company, Contact: b.client_name,
       Email: b.client_email, Phone: b.client_phone,
       Address: b.address, City: b.city, Type: b.building_type, Status: b.status,
+      Concierge: b.concierge_name, 'Concierge Phone': b.concierge_phone,
     })), 'buildings.csv');
   },
 };
@@ -278,6 +300,6 @@ function field(label, val, html = false) {
   if (!val && val !== 0) return '';
   return `<div class="detail-field">
     <span class="detail-label">${label}</span>
-    <span class="detail-value">${html ? val : (String(val) || '—')}</span>
+    <span class="detail-value">${html ? val : String(val)}</span>
   </div>`;
 }

@@ -1,0 +1,172 @@
+/* ── PM QUOTE MVP — Appended CSS additions ─────────────────────────────────
+   Append these rules to the bottom of styles.css
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Detail section labels */
+.detail-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  margin-bottom: .35rem;
+  padding-bottom: .25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Wizard step sizing */
+.wiz-wrap {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.wiz-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-top: .75rem;
+}
+
+.wiz-card h3 {
+  margin: 0 0 1.25rem 0;
+  font-size: 1.1rem;
+}
+
+/* Step bar */
+.wiz-steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.wiz-step-dot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .2rem;
+}
+
+.wiz-dot-num {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-muted);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+}
+
+.wiz-step-dot.active .wiz-dot-num { background: var(--primary); color: #fff; }
+.wiz-step-dot.done   .wiz-dot-num { background: var(--success, #22c55e); color: #fff; }
+
+.wiz-dot-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.wiz-step-dot.active .wiz-dot-label { color: var(--primary); font-weight: 600; }
+.wiz-step-dot.done   .wiz-dot-label { color: var(--text-muted); }
+
+.wiz-step-line {
+  flex: 1;
+  height: 2px;
+  background: var(--border);
+  min-width: 24px;
+  margin: 0 4px;
+  margin-bottom: 16px;
+}
+
+.wiz-actions {
+  display: flex;
+  gap: .5rem;
+  justify-content: flex-end;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+/* Review summary blocks */
+.review-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.review-block {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: .85rem 1rem;
+}
+
+.review-block h4 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  margin: 0 0 .5rem 0;
+}
+
+.review-block p { margin: .15rem 0; font-size: 14px; }
+.price-big { font-size: 1.4rem !important; font-weight: 700; }
+
+/* Row review highlight */
+.row-review td { background: #fffbeb !important; }
+
+/* Subcontractor table sell column */
+.sub-sell { font-weight: 600; font-size: 13px; }
+
+/* Cover image drop zone */
+.cover-img-zone {
+  border: 2px dashed var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+  text-align: center;
+  cursor: pointer;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cover-img-zone.drag-active { border-color: var(--primary); background: var(--primary-light, #eff6ff); }
+.dz-hint { color: var(--text-muted); font-size: 13px; }
+
+/* Form section label inside modal / wizard */
+.form-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  margin: .75rem 0 .4rem 0;
+  padding-bottom: .25rem;
+  border-bottom: 1px solid var(--border);
+  grid-column: 1 / -1;
+}
+
+/* Pricing totals refinement */
+.totals-grid { display: flex; flex-direction: column; gap: .3rem; }
+.totals-row {
+  display: flex;
+  justify-content: space-between;
+  padding: .3rem .5rem;
+  font-size: 13px;
+  border-radius: 4px;
+}
+.totals-row-bold {
+  font-weight: 700;
+  font-size: 14px !important;
+  background: var(--primary-light, #eff6ff);
+  border: 1px solid var(--border);
+}
+
+/* Table scroll wrapper */
+.table-scroll { overflow-x: auto; }
+
+/* Text utilities */
+.text-warn { color: #d97706; }
+.mb-8 { margin-bottom: .5rem; }
