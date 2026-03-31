@@ -949,16 +949,3 @@ code {
   transition: all 0.15s; min-height: 60px; display: flex; align-items: center; justify-content: center;
 }
 .cover-img-zone:hover { border-color: var(--primary); }
-
-/* ─── Equipment area grouping in building detail ───────────────── */
-.equip-area-group { border-bottom: 1px solid var(--border); }
-.equip-area-group:last-child { border-bottom: none; }
-.equip-area-header {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 16px; background: var(--bg3);
-  font-size: 12px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.4px; color: var(--text-muted);
-}
-.table-compact td, .table-compact th { padding: 6px 10px; font-size: 12.5px; }
-.detail-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-@media (max-width: 800px) { .detail-grid-2 { grid-template-columns: 1fr; } }

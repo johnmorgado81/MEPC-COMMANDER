@@ -93,7 +93,8 @@ export function generateProposalPDF(proposal, building) {
     doc.setFont('helvetica', 'bold');
     doc.setFillColor(240, 244, 255);
     doc.rect(12, y - 4, 191.9, 7, 'F');
-    doc.text(`${item.tag ? item.tag + '  — ' : ''}${item.equipment_type}${item.qty > 1 ? ' ×' + item.qty : ''}`, 14, y);
+    doc.text(`${item.tag || ''}  ${item.equipment_type}`, 14, y);
+    doc.text(formatCurrency(item.annual_price) + ' / yr', 203.9, y, { align: 'right' });
     y += 5;
 
     doc.setFont('helvetica', 'normal');
@@ -269,95 +270,83 @@ export function generateProposalPDFEnhanced(proposal, building, coverImageDataUr
   const pw    = 215.9, ph = 279.4, ml = 14, mr = pw - ml;
 
   // ─── COVER PAGE ─────────────────────────────────────────────────────────────
-  // Header band
+  // Dark header band
   doc.setFillColor(15, 25, 45);
-  doc.rect(0, 0, pw, 48, 'F');
+  doc.rect(0, 0, pw, 55, 'F');
   doc.setFillColor(59, 130, 246);
-  doc.rect(0, 45, pw, 3, 'F');
+  doc.rect(0, 52, pw, 3, 'F');
+
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(20); doc.setFont('helvetica', 'bold');
-  doc.text(co.name, ml, 18);
-  doc.setFontSize(9); doc.setFont('helvetica', 'normal');
-  doc.text(`${co.phone}  ·  ${co.email}  ·  ${co.website}`, ml, 27);
-  doc.text(`${co.address}, ${co.city}, ${co.province}  ·  GST ${co.gst}`, ml, 34);
+  doc.setFontSize(22); doc.setFont('helvetica', 'bold');
+  doc.text(co.name, ml, 22);
+  doc.setFontSize(10); doc.setFont('helvetica', 'normal');
+  doc.text(`${co.phone}  ·  ${co.email}  ·  ${co.website}`, ml, 30);
+  doc.setFontSize(9);
+  doc.text(`${co.address}, ${co.city}, ${co.province}  ·  GST ${co.gst}`, ml, 37);
   doc.setTextColor(0);
 
-  // Cover image — max height 70mm, aspect-ratio preserved, centered
-  let imgBottom = 50;
+  // Cover image
+  let coverBottom = 58;
   if (coverImageDataUrl) {
     try {
-      const imgType = coverImageDataUrl.match(/data:image\/(\w+)/)?.[1]?.toUpperCase() || 'JPEG';
-      let imgW = pw, imgH = 70;
-      try {
-        const props = doc.getImageProperties(coverImageDataUrl);
-        const ratio = Math.min(pw / props.width, 70 / props.height);
-        imgW = props.width * ratio;
-        imgH = props.height * ratio;
-      } catch { /* fallback dimensions above */ }
-      const imgX = (pw - imgW) / 2;
-      doc.addImage(coverImageDataUrl, imgType, imgX, 50, imgW, imgH, undefined, 'FAST');
-      imgBottom = 50 + imgH;
-    } catch { imgBottom = 50; }
+      const imgType = coverImageDataUrl.match(/data:\/\/image\/(\w+)/)?.[1]?.toUpperCase() ||
+                      coverImageDataUrl.match(/data:image\/(\w+)/)?.[1]?.toUpperCase() || 'JPEG';
+      // Get natural dimensions to preserve aspect ratio
+      const tmpImg = new Image();
+      tmpImg.src = coverImageDataUrl;
+      const natW = tmpImg.naturalWidth  || 1600;
+      const natH = tmpImg.naturalHeight || 900;
+      const maxW = pw;       // full page width in mm
+      const maxH = 90;       // max height allowed for cover image
+      const ratio = Math.min(maxW / natW, maxH / natH);
+      const imgW  = natW * ratio;
+      const imgH  = natH * ratio;
+      const imgX  = (pw - imgW) / 2;   // centered horizontally
+      doc.addImage(coverImageDataUrl, imgType, imgX, 55, imgW, imgH, undefined, 'FAST');
+      coverBottom = 55 + imgH + 6;
+    } catch { coverBottom = 58; }
   }
 
-  // Title band below image
-  const titleY = imgBottom + 6;
-  doc.setFillColor(59, 130, 246);
-  doc.rect(0, titleY - 1, pw, 14, 'F');
-  doc.setTextColor(255,255,255);
-  doc.setFont('helvetica','bold'); doc.setFontSize(14);
-  doc.text('PREVENTIVE MAINTENANCE PROPOSAL', ml, titleY + 8);
-  doc.setTextColor(0);
+  // Proposal title block
+  let cy = coverBottom + 10;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(18);
+  doc.text('PREVENTIVE MAINTENANCE', ml, cy); cy += 9;
+  doc.text('PROPOSAL', ml, cy); cy += 14;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
 
-  // Two-column info block: left = client, right = proposal details
-  const infoY = titleY + 20;
-  const halfW = (mr - ml) / 2 - 4;
+  const bldName = building.name || building.client_name || 'Draft';
+  const cliName = building.client_name || '';
+  const cliCo   = building.client_company || '';
+  const addr    = [building.address, building.city, building.province].filter(Boolean).join(', ');
 
-  // Left box — client info
-  doc.setFillColor(245, 248, 255);
-  doc.rect(ml, infoY, halfW, 55, 'F');
-  doc.setDrawColor(200); doc.rect(ml, infoY, halfW, 55);
-  let ly = infoY + 7;
-  doc.setFont('helvetica','bold'); doc.setFontSize(8);
-  doc.setTextColor(80,80,80);
-  doc.text('PREPARED FOR', ml + 4, ly); ly += 6;
-  doc.setTextColor(0);
-  doc.setFont('helvetica','bold'); doc.setFontSize(10);
-  const cliName = building.client_name || building.name || 'To Be Confirmed';
-  doc.text(cliName.slice(0, 32), ml + 4, ly); ly += 6;
-  doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
-  if (building.client_company) { doc.text(building.client_company.slice(0,38), ml+4, ly); ly += 5; }
-  if (building.name && building.name !== cliName) { doc.text(building.name.slice(0,38), ml+4, ly); ly += 5; }
-  const addr = [building.address, building.city, building.province].filter(Boolean).join(', ');
-  if (addr) { const aw = doc.splitTextToSize(addr, halfW-8); doc.text(aw[0], ml+4, ly); ly += 5; }
-  if (building.client_email) { doc.text(building.client_email.slice(0,35), ml+4, ly); ly += 5; }
-  if (building.client_phone) { doc.text(building.client_phone, ml+4, ly); }
+  doc.setFillColor(240, 245, 255);
+  doc.roundedRect(ml, cy - 5, mr - ml, 50, 2, 2, 'F');
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9); cy += 2;
+  doc.text('PREPARED FOR:', ml + 4, cy); cy += 6;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+  doc.text(cliName || bldName, ml + 4, cy); cy += 6;
+  if (cliCo) { doc.setFontSize(9); doc.text(cliCo, ml + 4, cy); cy += 5; }
+  doc.setFontSize(9);
+  if (addr) { doc.text(addr, ml + 4, cy); cy += 5; }
+  if (building.client_email) { doc.text(building.client_email, ml + 4, cy); cy += 5; }
+  if (building.client_phone) { doc.text(building.client_phone, ml + 4, cy); }
 
-  // Right box — proposal summary
-  const rx2 = ml + halfW + 8;
-  doc.setFillColor(15, 25, 45);
-  doc.rect(rx2, infoY, halfW, 55, 'F');
-  let ry2 = infoY + 7;
-  doc.setFont('helvetica','bold'); doc.setFontSize(8);
-  doc.setTextColor(160,180,220);
-  doc.text('PROPOSAL DETAILS', rx2 + 4, ry2); ry2 += 6;
-  const annual = Number(proposal.annual_value) || 0;
-  const monthly = Number(proposal.monthly_value) || annual / 12;
+  // Right column on cover
+  const rx = 130;
+  let ry = coverBottom + 10;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
   [
-    ['Proposal #', proposal.proposal_number || 'DRAFT'],
-    ['Date',       formatDate(proposal.created_date)],
-    ['Valid Until',formatDate(proposal.valid_until)],
-    ['Frequency',  (proposal.frequency||'').charAt(0).toUpperCase()+(proposal.frequency||'').slice(1)],
-    ['Annual Value', formatCurrency(annual)],
-    ['Monthly',    formatCurrency(monthly) + ' + GST'],
+    ['Proposal #', proposal.proposal_number || '—'],
+    ['Date', formatDate(proposal.created_date)],
+    ['Valid Until', formatDate(proposal.valid_until)],
+    ['Frequency', (proposal.frequency||'').charAt(0).toUpperCase()+(proposal.frequency||'').slice(1)],
+    ['Annual Value', formatCurrency(proposal.annual_value)],
+    ['Monthly Billing', formatCurrency(proposal.monthly_value)],
   ].forEach(([k, v]) => {
-    doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(140,160,200);
-    doc.text(k, rx2 + 4, ry2);
-    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(255,255,255);
-    doc.text(v, rx2 + halfW - 4, ry2, { align: 'right' });
-    ry2 += 7;
+    doc.setFont('helvetica', 'bold'); doc.text(k + ':', rx, ry);
+    doc.setFont('helvetica', 'normal'); doc.text(v, rx + 30, ry);
+    ry += 7;
   });
-  doc.setTextColor(0);
 
   addFooter(doc, 1);
 
@@ -385,12 +374,9 @@ export function generateProposalPDFEnhanced(proposal, building, coverImageDataUr
 
   cats.forEach(cat => {
     checkPage(18);
-    const isProgram = cat === 'Program Scope';
-    doc.setFillColor(...(isProgram ? [0, 100, 120] : [15, 25, 45]));
-    doc.rect(ml, y - 5, mr - ml, 8, 'F');
+    doc.setFillColor(15, 25, 45); doc.rect(ml, y - 5, mr - ml, 8, 'F');
     doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(10);
-    doc.text((isProgram ? 'PROGRAM SCOPE & SERVICES' : cat.toUpperCase()), ml + 3, y);
-    doc.setTextColor(0);
+    doc.text(cat.toUpperCase(), ml + 3, y); doc.setTextColor(0);
     y += 8;
 
     grouped[cat].forEach(item => {
@@ -430,9 +416,7 @@ export function generateProposalPDFEnhanced(proposal, building, coverImageDataUr
   doc.setTextColor(0); y += 7;
 
   let subtot = 0;
-  // Only equipment items — exclude Program Scope entries
-  const equipItems = items.filter(i => i.category !== 'Program Scope');
-  equipItems.forEach((item, idx) => {
+  items.forEach((item, idx) => {
     checkPage(7);
     if (idx % 2 === 0) { doc.setFillColor(248,250,255); doc.rect(ml, y-4, mr-ml, 6, 'F'); }
     doc.setFont('helvetica','normal'); doc.setFontSize(8);

@@ -40,7 +40,6 @@ const S = {
   paymentTerms: 'Net 30',
   coverImageDataUrl: null,
   isDraft: true,
-  rfpScope: [],       // [{ label, detail, _excluded }]
 
   // Existing buildings list (populated on init)
   buildingsList: [],
@@ -54,7 +53,7 @@ function resetState() {
       province:'BC', postal_code:'', client_email:'', client_phone:'', building_id: null },
     buildingConfidence: {}, rawEquipment: [], normalized: [],
     frequency: 'quarterly', title: '', notes: '', paymentTerms: 'Net 30',
-    coverImageDataUrl: null, isDraft: true, rfpScope: [],
+    coverImageDataUrl: null, isDraft: true,
   });
 }
 
@@ -218,9 +217,6 @@ async function _step2(el, wiz) {
   if (S.screenshotFile) {
     try {
       const text = await _runOCR(S.screenshotFile);
-      // Also extract RFP scope from screenshot text
-      const rfpFromScreenshot = _extractRFPScope(text);
-      rfpFromScreenshot.forEach(r => { if (!S.rfpScope.find(x=>x.label===r.label)) S.rfpScope.push(r); });
       const extracted = _extractBuildingFields(text);
       // Only fill blanks — don't overwrite manually-linked building
       if (!S.building.building_id) {
@@ -260,23 +256,11 @@ function _saveBldFields() {
 }
 
 async function _runOCR(file) {
-  if (typeof Tesseract === 'undefined') throw new Error('Tesseract.js not loaded — OCR unavailable. Enter fields manually.');
-  let worker;
-  try {
-    // Tesseract.js v4 and v5 have different createWorker signatures
-    if (Tesseract.createWorker.length >= 1) {
-      // v5: createWorker(lang)
-      worker = await Tesseract.createWorker('eng');
-    } else {
-      worker = await Tesseract.createWorker();
-      await worker.loadLanguage('eng');
-      await worker.initialize('eng');
-    }
-    const { data: { text } } = await worker.recognize(file);
-    return text || '';
-  } finally {
-    if (worker) { try { await worker.terminate(); } catch {} }
-  }
+  if (typeof Tesseract === 'undefined') throw new Error('Tesseract not loaded');
+  const worker = await Tesseract.createWorker('eng', 1, { logger: () => {} });
+  const { data: { text } } = await worker.recognize(file);
+  await worker.terminate();
+  return text;
 }
 
 function _extractBuildingFields(text) {
@@ -588,7 +572,6 @@ async function _step4(el, wiz) {
   };
   document.getElementById('recalc-btn').onclick = () => {
     _saveNormTable();
-    _saveNormTable();
     S.normalized.forEach(n => { n.annual_price = _calcPrice(n); });
     document.getElementById('norm-table-wrap').innerHTML = _renderNormTable();
     _bindNormTable();
@@ -685,7 +668,7 @@ function _renderNormTable() {
         <td>${n.type}</td>
         <td>${n.equipmaster || `<select class="norm-match-sel" data-i="${i}" style="font-size:12px">`+
           `<option value="">— Select —</option>`+
-          EQUIPMASTER.map(e=>`<option value="${e.equipment_type}" ${n.equipmaster===e.equipment_type?'selected':''}>${e.equipment_type} (${e.category})</option>`).join('')+
+          EQUIPMASTER.slice(0,50).map(e=>`<option value="${e.equipment_type}" ${n.equipmaster===e.equipment_type?'selected':''}>${e.equipment_type}</option>`).join('')+
           `</select>`}</td>
         <td>${confBadge(n.conf)}</td>
         <td><input class="norm-inp" data-i="${i}" data-f="category" value="${n.category||''}" style="width:80px;font-size:12px"></td>
@@ -718,7 +701,7 @@ function _bindNormTable() {
 function _saveNormTable() {
   document.querySelectorAll('.norm-inp').forEach(inp => {
     const i = Number(inp.dataset.i), f = inp.dataset.f;
-    if (S.normalized[i]) S.normalized[i][f] = ['qty','qtrHrs','annHrs'].includes(f) ? Number(inp.value)||0 : inp.value;
+    if (S.normalized[i]) S.normalized[i][f] = ['qty','qtrHrs','annHrs','annual_price'].includes(f) ? Number(inp.value)||0 : inp.value;
   });
 }
 
@@ -821,8 +804,6 @@ async function _saveProposal(exportPdf) {
   const annual   = S.normalized.reduce((s,n) => s + Number(n.annual_price||0), 0);
   const freqObj  = CONFIG.FREQUENCIES.find(f => f.value === S.frequency) || { visits: 4, label: S.frequency };
   const num      = 'P-' + String(Date.now()).slice(-5);
-  // Draft mode: fill in defaults so save never blocks
-  if (!S.building.name) S.building.name = 'Draft — ' + new Date().toLocaleDateString('en-CA');
 
   // Build scope_items from normalized
   const scopeItems = [
@@ -836,17 +817,7 @@ async function _saveProposal(exportPdf) {
       qty:            Number(n.qty) || 1,
       category:       n.category || 'Other',
       confidence:     n.conf,
-      scope_lines:    (() => {
-      const lines = getScopeText(n.equipmaster || n.type, n.frequency || S.frequency);
-      if (lines && lines.length) return lines;
-      // Fallback for unknown types
-      return [
-        `Inspect ${n.equipmaster || n.type || 'equipment'} for proper operation and condition`,
-        'Check all connections, fasteners, and mounting',
-        'Clean accessible components and note any deficiencies',
-        'Record equipment readings and report any concerns to property manager',
-      ];
-    })(),
+      scope_lines:    getScopeText(n.equipmaster || n.type, n.frequency || S.frequency),
     })),
     // RFP / Program scope items (no pricing — included in annual total)
     ...S.rfpScope.filter(r => !r._excluded).map(r => ({

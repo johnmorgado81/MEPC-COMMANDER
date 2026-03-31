@@ -33,7 +33,7 @@ export const Buildings = {
   async getById(id) {
     const { data, error } = await _sb
       .from('buildings')
-      .select('*')
+      .select('*, equipment(*)')
       .eq('id', id)
       .single();
     if (error) throw error;
@@ -70,22 +70,18 @@ export const Equipment = {
     const { data, error } = await _sb
       .from('equipment')
       .select('*, buildings(name)')
-      .order('building_id')
-      .order('service_area')
       .order('tag');
     if (error) throw error;
-    return data || [];
+    return data;
   },
   async getByBuilding(buildingId) {
     const { data, error } = await _sb
       .from('equipment')
       .select('*')
       .eq('building_id', buildingId)
-      .order('service_area')
-      .order('category')
       .order('tag');
     if (error) throw error;
-    return data || [];
+    return data;
   },
   async getById(id) {
     const { data, error } = await _sb
