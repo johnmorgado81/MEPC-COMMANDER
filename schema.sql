@@ -408,3 +408,101 @@ exception when others then null; end $$;
 comment on column proposals.cover_image_url is 'URL or null — cover image stored externally if using Supabase Storage';
 comment on column proposals.raw_intake is 'Raw extracted data from OCR, file parse, and drawing scan';
 comment on column proposals.is_draft is 'True while proposal is in wizard/draft state';
+
+-- =============================================================
+-- BUILDING + EQUIPMENT EXTENDED MODEL (v1.2 migration)
+-- Run in Supabase SQL Editor — safe to run multiple times
+-- =============================================================
+
+-- Buildings: extended fields
+do $$ begin
+  alter table buildings add column if not exists contact_name       text;
+  alter table buildings add column if not exists contact_email      text;
+  alter table buildings add column if not exists contact_phone      text;
+  alter table buildings add column if not exists building_notes     text;
+  alter table buildings add column if not exists proposal_notes     text;
+  alter table buildings add column if not exists access_notes       text;
+  alter table buildings add column if not exists subcontractor_scopes jsonb default '[]'::jsonb;
+  -- Service area enablement flags
+  alter table buildings add column if not exists common_strata_enabled        boolean default true;
+  alter table buildings add column if not exists commercial_enabled           boolean default false;
+  alter table buildings add column if not exists residential_enabled          boolean default false;
+  alter table buildings add column if not exists primary_service_area         text    default 'common_strata';
+exception when others then null; end $$;
+
+-- Equipment: extended fields for PM proposal workflow
+do $$ begin
+  alter table equipment add column if not exists service_area              text    default 'common_strata';
+  alter table equipment add column if not exists equipment_class           text;
+  alter table equipment add column if not exists category                  text;
+  alter table equipment add column if not exists qty                       integer default 1;
+  alter table equipment add column if not exists quarterly_hours           numeric(6,2);
+  alter table equipment add column if not exists annual_hours              numeric(6,2);
+  alter table equipment add column if not exists override_quarterly_hours  numeric(6,2);
+  alter table equipment add column if not exists override_annual_hours     numeric(6,2);
+  alter table equipment add column if not exists manufacturer              text;
+  alter table equipment add column if not exists description               text;
+  alter table equipment add column if not exists source_type               text    default 'manual';
+  alter table equipment add column if not exists source_reference          text;
+  alter table equipment add column if not exists match_confidence          text    default 'manual';
+exception when others then null; end $$;
+
+-- Rename make column if it exists as "make" already (no-op if already "manufacturer")
+-- (The original schema used "make" — equipment.js now uses "manufacturer")
+-- Keep both: "make" stays for backward compat, "manufacturer" is the new display field
+-- They are separate columns; openForm writes to "manufacturer"
+
+-- Index for service area grouping
+create index if not exists equipment_service_area_idx on equipment(building_id, service_area);
+create index if not exists equipment_category_idx     on equipment(category);
+
+-- =============================================================
+-- EQUIPMASTER DATASET UPGRADE MIGRATION
+-- Run after initial schema is already deployed
+-- =============================================================
+
+-- Update maintenance_items column names if upgrading from v1.0
+-- (safe to run multiple times)
+do $$ begin
+  -- Add new-name columns if they don't exist
+  alter table maintenance_items add column if not exists quarterly_hours   numeric(5,2);
+  alter table maintenance_items add column if not exists annual_hours      numeric(5,2);
+  alter table maintenance_items add column if not exists semi_annual_hours numeric(5,2);
+  alter table maintenance_items add column if not exists monthly_hours     numeric(5,2);
+  alter table maintenance_items add column if not exists building_age      text;
+  alter table maintenance_items add column if not exists electrical_data   text;
+  -- Copy from old columns if they exist
+  update maintenance_items set quarterly_hours   = quarterly_std_hours   where quarterly_hours is null and quarterly_std_hours is not null;
+  update maintenance_items set annual_hours      = annual_std_hours      where annual_hours is null and annual_std_hours is not null;
+  update maintenance_items set semi_annual_hours = semi_annual_std_hours where semi_annual_hours is null and semi_annual_std_hours is not null;
+  update maintenance_items set monthly_hours     = monthly_std_hours     where monthly_hours is null and monthly_std_hours is not null;
+exception when others then null; end $$;
+
+-- =============================================================
+-- EQUIPMENT MANUFACTURERS TABLE (normalized from EQUIPMASTER)
+-- =============================================================
+create table if not exists equipment_manufacturers (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null unique,
+  created_at timestamptz default now()
+);
+
+-- =============================================================
+-- EQUIPMENT ALIASES (from _SUMMARY_HOURS_SOURCE sheet)
+-- Maps supplementary source names to canonical EQUIPMASTER types
+-- =============================================================
+create table if not exists equipment_aliases (
+  id             uuid primary key default gen_random_uuid(),
+  canonical_type text not null,
+  alias_text     text not null,
+  quarterly_hours numeric(5,2),
+  annual_hours    numeric(5,2),
+  mapping_note    text,
+  created_at      timestamptz default now(),
+  unique(alias_text)
+);
+
+do $$ begin
+  create trigger equipment_manufacturers_no_upd before update on equipment_manufacturers
+    for each row execute function set_updated_at();
+exception when duplicate_object then null; end $$;

@@ -1,5 +1,5 @@
 // maintenance-items.js — Equipment type library with standard PM hours
-// Drives proposal time estimates. Sourced from EQUIPMASTER.xlsx (174 types).
+// Drives proposal time estimates. Sourced from EQUIPMASTER.xlsx (195 types, 14 categories).
 
 import { MaintenanceItems } from './db.js';
 import { EQUIPMASTER }      from './equipmaster.js';
@@ -61,7 +61,7 @@ export const MaintItems = {
     if (data.length === 0) {
       wrap.innerHTML = `<div class="empty-state">
         <p>No items loaded.</p>
-        <p>Click <strong>Seed from EQUIPMASTER</strong> to load the full library (174 types).</p>
+        <p>Click <strong>Seed from EQUIPMASTER</strong> to load the full library (195 types).</p>
       </div>`;
       return;
     }
@@ -157,10 +157,10 @@ export const MaintItems = {
         category:              e.category,
         tag_prefix:            e.tag_prefix || null,
         manufacturers:         e.manufacturers || null,
-        monthly_std_hours:     e.monthly_std_hours    ?? null,
-        quarterly_std_hours:   e.quarterly_std_hours  ?? null,
-        semi_annual_std_hours: e.semi_annual_std_hours ?? null,
-        annual_std_hours:      e.annual_std_hours      ?? null,
+        monthly_std_hours:     e.monthly_hours       ?? null,
+        quarterly_std_hours:   e.quarterly_hours     ?? null,
+        semi_annual_std_hours: e.semi_annual_hours   ?? null,
+        annual_std_hours:      e.annual_hours        ?? null,
         belt_size:             e.belt_size     || null,
         filter_size:           e.filter_size   || null,
         filter_type:           e.filter_type   || null,

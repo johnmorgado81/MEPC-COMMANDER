@@ -4,6 +4,7 @@
 
 import { notify } from './ui.js';
 import { PricingMatrix } from './db.js';
+import { EQUIPMASTER, EQUIPMASTER_MANUFACTURERS } from './equipmaster.js';
 
 // ─────────────────────────────────────────────
 // Main Render
@@ -313,59 +314,32 @@ async function parseDrawing(file) {
 
 // ─────────────────────────────────────────────
 // Text extraction helpers
-// Vocabulary driven by EQUIPMASTER.xlsx (174 types across 13 categories)
-// ─────────────────────────────────────────────
+// ─── Equipment vocabulary — driven by EQUIPMASTER dataset ────────────────────
+// Built at module load time from the live EQUIPMASTER data (195 types)
 
-// All known equipment type strings from EQUIPMASTER — matched case-insensitively
-const EQUIP_VOCAB = [
-  'air handling unit','ahu','rooftop unit','rtu','fan coil unit','fcu',
-  'make-up air unit','mau','heat recovery ventilator','hrv','energy recovery ventilator','erv',
-  'variable air volume','vav','unit ventilator','uv','split system','dx unit','vrf',
-  'hot water boiler','steam boiler','condensing boiler','boiler',
-  'chiller','cooling tower','condenser',
-  'plate heat exchanger','shell and tube','heat exchanger',
-  'circulation pump','domestic water pump','sump pump','duplex sump pump',
-  'storm pump','condensate pump','booster pump','pump',
-  'expansion tank','bladder tank','pressure tank',
-  'backflow preventer','rpz','dcva','pvb',
-  'pressure reducing valve','prv','pressure relief valve',
-  'domestic hot water heater','storage tank','indirect water heater','dhw','water heater',
-  'exhaust fan','supply fan','ahu fan','belt drive fan','direct drive fan','fan',
-  'bas controller','ddc','bas panel','network controller','thermostat','vfd',
-  'generator','transfer switch','ups','fuel oil tank','day tank','fuel transfer pump',
-  'chemical feeder','side stream filter','conductivity controller','water treatment',
-  'pool pump','pool filter','pool heater',
-  'snow melt pump','radiant pump','manifold',
-  'air compressor','air dryer','air receiver',
-  'pressure gauge','temperature gauge','flow meter',
-  'ball valve','butterfly valve','check valve','gate valve','control valve','solenoid valve',
-  'grease interceptor','sand interceptor','sewage ejector','lift station',
-  'irrigation pump','irrigation controller','irrigation backflow',
-  'condensate drain','trap','strainer','y-strainer',
-];
+function _buildEquipRegex() {
+  const types = EQUIPMASTER.map(e => e.equipment_type)
+    .sort((a, b) => b.length - a.length);
+  return new RegExp(
+    '(' + types.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')',
+    'gi'
+  );
+}
 
-// Build a single regex from vocab (longest first to avoid partial matches)
-const EQUIP_REGEX = new RegExp(
-  '(' + EQUIP_VOCAB.sort((a,b) => b.length - a.length).map(e =>
-    e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  ).join('|') + ')',
-  'gi'
-);
+function _buildMfrRegex() {
+  // Use all manufacturers from dataset, sorted longest first
+  const mfrs = EQUIPMASTER_MANUFACTURERS
+    .filter(m => m.length > 2)
+    .sort((a, b) => b.length - a.length)
+    .map(m => m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return new RegExp('\\b(' + mfrs.join('|') + ')\\b', 'gi');
+}
 
-// Tag prefix patterns (from EQUIPMASTER tag_prefix column)
-const TAG_PATTERN = /\b([A-Z]{1,4})-?\d{1,3}[A-Z]?\b/g;
+const EQUIP_REGEX   = _buildEquipRegex();
+const MFR_REGEX     = _buildMfrRegex();
 
-// Manufacturer names (partial list from EQUIPMASTER manufacturers column)
-const MFR_VOCAB = [
-  'trane','carrier','daikin','york','lennox','aaon','temtrol','engineered air',
-  'viessmann','lochinvar','raypak','cleaver-brooks','weil-mclain','nti','ibc','aerco',
-  'grundfos','taco','armstrong','bell gossett','b&g','xylem','goulds','armstrong',
-  'honeywell','siemens','johnson controls','schneider','delta controls','distech','alerton',
-  'ao smith','bradford white','rheem','navien','rinnai','noritz','bosch','john wood',
-  'pentair','hayward','sta-rite','watts','wilkins','febco','apollo','victaulic',
-  'belimo','johnson','danfoss','spirax','armstrong','amtrol','wessels',
-];
-const MFR_REGEX = new RegExp('\\b(' + MFR_VOCAB.join('|') + ')\\b', 'gi');
+// Tag prefix patterns — extended for mechanical drawings
+const TAG_PATTERN = /\b([A-Z]{1,5}[-\/]?\d{1,4}[A-Z]?)\b/g;
 
 function extractEquipmentFromText(text) {
   const lines   = text.split('\n').map(l => l.trim()).filter(Boolean);

@@ -473,9 +473,12 @@ async function _parsePDF(file, statusEl, isDrawing = false) {
   return _extractEquipFromText(allText, isDrawing ? 'drawing' : 'pdf');
 }
 
+// Equipment vocab regex — built from live EQUIPMASTER (195 types)
 const EQUIP_VOCAB_RE = new RegExp(
-  '(' + EQUIPMASTER.map(e => e.equipment_type).sort((a,b)=>b.length-a.length)
-    .map(s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')',
+  '(' + EQUIPMASTER.map(e => e.equipment_type)
+    .sort((a,b) => b.length - a.length)
+    .map(s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'))
+    .join('|') + ')',
   'gi'
 );
 const TAG_RE = /\b([A-Z]{1,5}-?\d{1,3}[A-Z]?)\b/g;
@@ -635,8 +638,8 @@ function _normalizeItem(raw) {
   if (match) {
     equipmaster = match.equipment_type;
     category    = match.category || 'Other';
-    qtrHrs      = match.quarterly_std_hours  || 1.0;
-    annHrs      = match.annual_std_hours      || 4.0;
+    qtrHrs      = match.quarterly_hours  || 1.0;
+    annHrs      = match.annual_hours      || 4.0;
     conf = match.equipment_type.toLowerCase() === (raw.type||'').toLowerCase() ? 'exact' : 'strong';
   } else {
     // Partial match — scan for word overlap
@@ -646,7 +649,7 @@ function _normalizeItem(raw) {
       : null;
     if (partial) {
       equipmaster = partial.equipment_type; category = partial.category;
-      qtrHrs = partial.quarterly_std_hours||1; annHrs = partial.annual_std_hours||4; conf = 'review';
+      qtrHrs = partial.quarterly_hours||1; annHrs = partial.annual_hours||4; conf = 'review';
     } else {
       // Unknown — use safe defaults so draft still generates cleanly
       equipmaster = null; category = 'Other'; qtrHrs = 1.0; annHrs = 4.0; conf = 'unknown';
@@ -709,7 +712,7 @@ function _bindNormTable() {
       const i = Number(sel.dataset.i);
       _saveNormTable();
       const match = findEquipType(sel.value);
-      if (match) { S.normalized[i].equipmaster = match.equipment_type; S.normalized[i].category = match.category||''; S.normalized[i].qtrHrs = match.quarterly_std_hours||1; S.normalized[i].annHrs = match.annual_std_hours||4; S.normalized[i].conf = 'strong'; S.normalized[i].annual_price = _calcPrice(S.normalized[i]); }
+      if (match) { S.normalized[i].equipmaster = match.equipment_type; S.normalized[i].category = match.category||''; S.normalized[i].qtrHrs = match.quarterly_hours||1; S.normalized[i].annHrs = match.annual_hours||4; S.normalized[i].conf = 'strong'; S.normalized[i].annual_price = _calcPrice(S.normalized[i]); }
       document.getElementById('norm-table-wrap').innerHTML = _renderNormTable(); _bindNormTable();
     };
   });
