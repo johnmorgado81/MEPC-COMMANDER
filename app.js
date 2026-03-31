@@ -1,21 +1,18 @@
-// js/app.js — application bootstrap
-// BRANCH: PM Quote MVP — full platform modules disabled until further notice
+// app.js — PM Quote MVP bootstrap
 import { CONFIG, syncConfigFromEquipmaster } from './config.js';
-import { initDB }     from './db.js';
+import { initDB, isReady }   from './db.js';
 import { register, start, navigate } from './router.js';
 import { Auth, showAuthScreen, hideAuthScreen, renderUserBadge } from './auth.js';
 
 // Lazy-load PM-relevant modules only
-// Full-platform modules (pm-records, quotes, reporting, dispatch-ocr, document-parser)
-// are intentionally excluded from this branch.
 const load = {
-  Dashboard:   () => import('./dashboard.js').then(m => m.Dashboard),
-  Buildings:   () => import('./buildings.js').then(m => m.Buildings),
-  Equipment:   () => import('./equipment.js').then(m => m.Equipment),
-  Proposals:   () => import('./proposals.js').then(m => m.Proposals),
-  Pricing:     () => import('./pricing.js').then(m => m.Pricing),
-  MaintItems:  () => import('./maintenance-items.js').then(m => m.MaintItems),
-  Settings:    () => import('./settings.js').then(m => m.Settings),
+  Dashboard:  () => import('./dashboard.js').then(m => m.Dashboard),
+  Buildings:  () => import('./buildings.js').then(m => m.Buildings),
+  Equipment:  () => import('./equipment.js').then(m => m.Equipment),
+  Proposals:  () => import('./proposals.js').then(m => m.Proposals),
+  Pricing:    () => import('./pricing.js').then(m => m.Pricing),
+  MaintItems: () => import('./maintenance-items.js').then(m => m.MaintItems),
+  Settings:   () => import('./settings.js').then(m => m.Settings),
 };
 
 const NAV_ITEMS = [
@@ -28,10 +25,9 @@ const NAV_ITEMS = [
   { route: '/settings',    label: 'Settings',     icon: '⚙' },
 ];
 
-// ─── Active nav highlight ───────────────────────────────────────────────────
 function syncNav() {
-  const hash  = window.location.hash.replace('#','') || '/';
-  const base  = '/' + (hash.split('/')[1] || '');
+  const hash = window.location.hash.replace('#', '') || '/';
+  const base = '/' + (hash.split('/')[1] || '');
   document.querySelectorAll('.nav-item').forEach(a => {
     a.classList.toggle('active', a.dataset.route === base || (base === '/' && a.dataset.route === '/'));
   });
@@ -58,7 +54,6 @@ function renderSidebarLogo() {
     <div class="logo-sub">${CONFIG.COMPANY.name}</div>`;
 }
 
-// ─── Route registration — PM Quote MVP only ─────────────────────────────────
 function registerRoutes() {
   register('/', async (_, el) => { const M = await load.Dashboard(); M.init(el); });
   register('/buildings', async (_, el) => { const M = await load.Buildings(); M.init(el); });
@@ -73,12 +68,11 @@ function registerRoutes() {
   register('/settings', async (_, el) => { const M = await load.Settings(); M.init(el); });
 }
 
-export function setPageTitle(title, crumbs = []) {
+export function setPageTitle(title) {
   const t = document.getElementById('topbar-title');
   if (t) t.textContent = title;
 }
 
-// ─── Topbar refresh button ───────────────────────────────────────────────────
 function wireTopbar() {
   document.getElementById('topbar-refresh')?.addEventListener('click', () => {
     const hash = window.location.hash;
@@ -87,21 +81,50 @@ function wireTopbar() {
   });
 }
 
-// ─── Auth guard + boot ──────────────────────────────────────────────────────
+function showConfigError(msg) {
+  const overlay = document.getElementById('auth-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('hidden');
+  overlay.innerHTML = `
+    <div class="auth-box">
+      <div class="auth-logo">
+        <div class="auth-logo-mark" style="background:#dc2626">!</div>
+        <div class="auth-logo-name">${CONFIG.APP_NAME}</div>
+      </div>
+      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:1rem;margin-top:1rem">
+        <strong style="color:#dc2626">Configuration Required</strong>
+        <p style="margin:.5rem 0 0;font-size:13px;color:#7f1d1d">${msg}</p>
+      </div>
+      <p style="font-size:12px;color:#6b7280;margin-top:1rem">
+        Open <code>config.js</code> and set your <code>SUPABASE_URL</code> and
+        <code>SUPABASE_ANON_KEY</code> from Supabase Dashboard → Settings → API.
+      </p>
+    </div>`;
+}
+
 async function boot() {
-  try { initDB(); } catch(e) { console.warn("DB init failed:", e.message); }
-  try {
-    const { EQUIPMASTER } = await import('./equipmaster.js');
-    syncConfigFromEquipmaster(EQUIPMASTER);
-  } catch(e) { console.warn("EQUIPMASTER sync failed:", e.message); }
   renderSidebarLogo();
   renderNav();
   registerRoutes();
   wireTopbar();
 
+  let dbOk = false;
+  try {
+    initDB();
+    dbOk = true;
+  } catch (e) {
+    console.error('[boot] DB init failed:', e.message);
+    showConfigError(e.message);
+    return;
+  }
+
+  try {
+    const { EQUIPMASTER } = await import('./equipmaster.js');
+    syncConfigFromEquipmaster(EQUIPMASTER);
+  } catch (e) { console.warn('[boot] EQUIPMASTER sync failed:', e.message); }
+
   let _routerStarted = false;
   Auth.onAuthChange((event, session) => {
-    console.log('[auth] onAuthChange:', event, session ? 'session' : 'no session');
     if (session) {
       hideAuthScreen();
       renderUserBadge(session.user);
@@ -117,8 +140,6 @@ async function boot() {
   });
 
   const session = await Auth.getSession();
-  console.log('[auth] boot session:', session ? 'found' : 'none');
-
   if (session) {
     hideAuthScreen();
     renderUserBadge(session.user);

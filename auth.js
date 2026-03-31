@@ -1,55 +1,56 @@
 // auth.js — Supabase magic link authentication
-// Sign-in with email → Supabase sends a link → user clicks → session persists.
-// No password. No registration. Internal single-company use.
-
-import { getClient } from './db.js';
-import { CONFIG }     from './config.js';
-
-// ─── Public API ──────────────────────────────────────────────────────────────
+import { getClient, isReady } from './db.js';
+import { CONFIG } from './config.js';
 
 export const Auth = {
 
-  // Returns current session or null
   async getSession() {
-    const sb = getClient();
-    const { data } = await sb.auth.getSession();
-    return data?.session ?? null;
+    if (!isReady()) return null;
+    try {
+      const { data } = await getClient().auth.getSession();
+      return data?.session ?? null;
+    } catch { return null; }
   },
 
-  // Returns current user or null (no network call)
   async getUser() {
-    const sb = getClient();
-    const { data } = await sb.auth.getUser();
-    return data?.user ?? null;
+    if (!isReady()) return null;
+    try {
+      const { data } = await getClient().auth.getUser();
+      return data?.user ?? null;
+    } catch { return null; }
   },
 
-  // Send magic link to email address
   async sendMagicLink(email) {
-    const sb = getClient();
-    const { error } = await sb.auth.signInWithOtp({
+    if (!isReady()) throw new Error('Database not configured. Check config.js.');
+    const { error } = await getClient().auth.signInWithOtp({
       email,
-      options: {
-        shouldCreateUser: false,  // only allow existing users — add users via Supabase Dashboard
-        emailRedirectTo: window.location.origin + '/',
-      },
+      options: { shouldCreateUser: false, emailRedirectTo: window.location.origin + '/' },
     });
     if (error) throw error;
   },
 
-  // Sign out — clears session from browser
   async signOut() {
-    const sb = getClient();
-    const { error } = await sb.auth.signOut();
-    if (error) throw error;
+    if (!isReady()) return;
+    try {
+      const { error } = await getClient().auth.signOut();
+      if (error) throw error;
+    } catch (e) { console.warn('Sign out error:', e.message); }
   },
 
-  // Listen for auth state changes (sign-in / sign-out / token refresh)
   onAuthChange(callback) {
-    const sb = getClient();
-    const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
-      callback(event, session);
-    });
-    return subscription;
+    if (!isReady()) {
+      // No-op subscription — return a fake object so callers don't crash
+      return { unsubscribe: () => {} };
+    }
+    try {
+      const { data: { subscription } } = getClient().auth.onAuthStateChange((event, session) => {
+        callback(event, session);
+      });
+      return subscription;
+    } catch (e) {
+      console.warn('onAuthChange failed:', e.message);
+      return { unsubscribe: () => {} };
+    }
   },
 };
 
@@ -59,7 +60,6 @@ export function showAuthScreen() {
   const overlay = document.getElementById('auth-overlay');
   if (!overlay) return;
   overlay.classList.remove('hidden');
-
   overlay.innerHTML = `
     <div class="auth-box">
       <div class="auth-logo">
@@ -67,12 +67,8 @@ export function showAuthScreen() {
         <div class="auth-logo-name">${CONFIG.APP_NAME}</div>
         <div class="auth-logo-company">${CONFIG.COMPANY.name}</div>
       </div>
-      <div id="auth-panel">
-        ${renderSignInForm()}
-      </div>
-    </div>
-  `;
-
+      <div id="auth-panel">${renderSignInForm()}</div>
+    </div>`;
   document.getElementById('auth-form')?.addEventListener('submit', handleSignIn);
 }
 
@@ -81,112 +77,61 @@ export function hideAuthScreen() {
   if (overlay) overlay.classList.add('hidden');
 }
 
-function renderSignInForm() {
-  return `
-    <h2 class="auth-heading">Sign In</h2>
-    <p class="auth-sub">Enter your email. We'll send you a sign-in link — no password needed.</p>
-    <form id="auth-form" autocomplete="on">
-      <div class="form-group">
-        <label for="auth-email">Work Email</label>
-        <input type="email" id="auth-email" name="email" placeholder="you@mecmechanical.ca"
-               required autocomplete="email">
-      </div>
-      <button type="submit" class="btn btn-primary w-full" id="auth-submit-btn">
-        Send Sign-In Link
-      </button>
-    </form>
-    <div id="auth-msg" class="auth-msg hidden"></div>
-    <p class="auth-note">
-      Access is invite-only. Contact your administrator if you need access.
-    </p>
-  `;
+export function renderUserBadge(user) {
+  const badge = document.getElementById('user-badge');
+  if (!badge || !user) return;
+  const email = user.email || '';
+  const initials = email.slice(0, 2).toUpperCase();
+  badge.innerHTML = `
+    <span class="user-avatar" title="${email}">${initials}</span>
+    <button class="btn btn-xs btn-ghost" id="signout-btn" title="Sign out">↩</button>`;
+  document.getElementById('signout-btn')?.addEventListener('click', async () => {
+    await Auth.signOut();
+    window.location.reload();
+  });
 }
 
-function renderSentMessage(email) {
+function renderSignInForm() {
   return `
-    <div class="auth-sent">
-      <div class="auth-sent-icon">✉</div>
-      <h2>Check your email</h2>
-      <p>A sign-in link was sent to <strong>${email}</strong>.</p>
-      <p class="auth-sub">Click the link in the email to access ${CONFIG.APP_NAME}. The link expires in 60 minutes.</p>
-      <button class="btn btn-secondary" id="auth-resend-btn">Resend Link</button>
-    </div>
-  `;
+    <h3 style="margin-bottom:1rem">Sign In</h3>
+    <form id="auth-form">
+      <div class="form-group">
+        <label>Email address</label>
+        <input type="email" id="auth-email" class="input" placeholder="you@company.com" required autocomplete="email">
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:.75rem" id="auth-submit">
+        Send Magic Link
+      </button>
+    </form>
+    <p class="text-muted" style="font-size:12px;margin-top:.75rem;text-align:center">
+      We'll email you a one-click sign-in link. No password needed.
+    </p>`;
 }
 
 async function handleSignIn(e) {
   e.preventDefault();
   const email = document.getElementById('auth-email')?.value?.trim();
-  const btn   = document.getElementById('auth-submit-btn');
-  const msg   = document.getElementById('auth-msg');
-
+  const btn   = document.getElementById('auth-submit');
+  const panel = document.getElementById('auth-panel');
   if (!email) return;
-
-  btn.disabled = true;
-  btn.textContent = 'Sending…';
-  msg.classList.add('hidden');
-
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
   try {
     await Auth.sendMagicLink(email);
-    document.getElementById('auth-panel').innerHTML = renderSentMessage(email);
-    document.getElementById('auth-resend-btn')?.addEventListener('click', async () => {
-      await Auth.sendMagicLink(email);
-      const rb = document.getElementById('auth-resend-btn');
-      if (rb) { rb.textContent = 'Sent!'; rb.disabled = true; }
-    });
+    if (panel) panel.innerHTML = `
+      <div style="text-align:center;padding:1rem">
+        <div style="font-size:2rem;margin-bottom:.5rem">✉️</div>
+        <h4>Check your email</h4>
+        <p class="text-muted">A sign-in link was sent to <strong>${email}</strong>.</p>
+        <p class="text-muted" style="font-size:12px;margin-top:.5rem">Click the link in your email to continue.</p>
+      </div>`;
   } catch (err) {
-    btn.disabled = false;
-    btn.textContent = 'Send Sign-In Link';
-    msg.textContent = err.message || 'Sign-in failed. Check your email address.';
-    msg.classList.remove('hidden');
-    msg.classList.add('auth-error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Send Magic Link'; }
+    const errEl = document.getElementById('auth-error');
+    if (errEl) {
+      errEl.textContent = err.message;
+    } else {
+      const form = document.getElementById('auth-form');
+      if (form) form.insertAdjacentHTML('beforebegin', `<div id="auth-error" class="error-state" style="margin-bottom:.5rem;font-size:13px">${err.message}</div>`);
+    }
   }
-}
-
-// ─── Topbar user badge ────────────────────────────────────────────────────────
-export function renderUserBadge(user) {
-  const el = document.getElementById('topbar-user');
-  if (!el || !user) return;
-
-  const email = user.email || '';
-  const initials = email.charAt(0).toUpperCase();
-
-  el.innerHTML = `
-    <div class="user-badge" id="user-badge-btn" title="${email}">
-      <span class="user-initial">${initials}</span>
-      <span class="user-email-short">${email.split('@')[0]}</span>
-    </div>
-  `;
-
-  // Toggle sign-out menu
-  document.getElementById('user-badge-btn')?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const existing = document.getElementById('user-dropdown');
-    if (existing) { existing.remove(); return; }
-
-    const menu = document.createElement('div');
-    menu.id = 'user-dropdown';
-    menu.className = 'user-dropdown';
-    menu.innerHTML = `
-      <div class="user-dropdown-email">${email}</div>
-      <hr class="user-dropdown-sep">
-      <button class="user-dropdown-btn" id="signout-btn">Sign Out</button>
-    `;
-    document.body.appendChild(menu);
-
-    const rect = el.getBoundingClientRect();
-    menu.style.position  = 'fixed';
-    menu.style.top       = (rect.bottom + 8) + 'px';
-    menu.style.right     = (window.innerWidth - rect.right) + 'px';
-
-    document.getElementById('signout-btn')?.addEventListener('click', async () => {
-      await Auth.signOut();
-      menu.remove();
-    });
-
-    // Dismiss on outside click
-    setTimeout(() => {
-      document.addEventListener('click', () => menu.remove(), { once: true });
-    }, 0);
-  });
 }
