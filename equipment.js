@@ -5,7 +5,7 @@ import { CONFIG }         from './config.js';
 import { formatDate, statusBadge, exportCSV, today, addMonths, isOverdue, isDueSoon } from './helpers.js';
 import { openModal, closeModal, confirm, notify, makeSortable, spinner, emptyState, getFormData, selectOptions } from './ui.js';
 import { navigate }       from './router.js';
-import { getStdHours, findEquipType } from './equipmaster.js';
+import { getStdHours, findEquipType, getEquipDefaults, EQUIPMASTER, EQUIPMASTER_MANUFACTURERS, EQUIPMASTER_CATEGORIES } from './equipmaster.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const SERVICE_AREA_LABELS = {
@@ -211,15 +211,18 @@ export const Equipment = {
         <div class="form-row">
           <div class="form-group">
             <label>Equipment Type *</label>
-            ${combo('equipment_type', CONFIG.EQUIPMENT_TYPES, eType, 'Select or type type…')}
+            <input name="equipment_type" class="input" list="dl-eq-type" value="${eType}" placeholder="Select or type equipment type…" autocomplete="off">
+            <datalist id="dl-eq-type">${EQUIPMASTER.map(e => `<option value="${e.equipment_type}" data-tag="${e.tag_prefix||''}" data-cat="${e.category||''}" data-qhr="${e.quarterly_hours||''}" data-ahr="${e.annual_hours||''}">`).join('')}</datalist>
           </div>
           <div class="form-group">
             <label>Equipment Class</label>
-            ${combo('equipment_class', CONFIG.EQUIPMENT_CLASSES, eCls, 'Select or type class…')}
+            <input name="equipment_class" class="input" list="dl-eq-cls" value="${eCls}" placeholder="Select or type class…" autocomplete="off">
+            <datalist id="dl-eq-cls">${CONFIG.EQUIPMENT_CLASSES.map(c => `<option value="${c}">`).join('')}</datalist>
           </div>
           <div class="form-group">
             <label>Category</label>
-            ${combo('category', CONFIG.EQUIPMENT_CATEGORIES, eCat, 'Select or type category…')}
+            <input name="category" class="input" list="dl-eq-cat" value="${eCat}" placeholder="Select or type category…" autocomplete="off">
+            <datalist id="dl-eq-cat">${EQUIPMASTER_CATEGORIES.map(c => `<option value="${c}">`).join('')}</datalist>
           </div>
         </div>
         <div class="form-row">
@@ -234,6 +237,13 @@ export const Equipment = {
           <div class="form-group">
             <label>Serial Number</label>
             <input name="serial_number" class="input" value="${existing?.serial_number||''}">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Manufacturer</label>
+            <input name="manufacturer" class="input" list="dl-eq-mfr" value="${existing?.manufacturer||''}" placeholder="Select or type manufacturer…" autocomplete="off">
+            <datalist id="dl-eq-mfr">${EQUIPMASTER_MANUFACTURERS.slice(0,200).map(m => `<option value="${m}">`).join('')}</datalist>
           </div>
         </div>
         <div class="form-row">
@@ -276,34 +286,36 @@ export const Equipment = {
       { label: id ? 'Save Changes' : 'Add Equipment', class: 'btn-primary', onClick: () => this.saveEquipment(id) },
     ]);
 
-    // Auto-fill hours from EQUIPMASTER when type/class changes
-    const fillHours = () => {
+    // Auto-fill from EQUIPMASTER when equipment type changes
+    const fillFromLibrary = (force = false) => {
       const typeVal = document.querySelector('[name="equipment_type"]')?.value;
       const clsVal  = document.querySelector('[name="equipment_class"]')?.value;
-      const match   = findEquipType(clsVal || typeVal);
-      if (match) {
-        const qEl = document.getElementById('eq-qhrs');
-        const aEl = document.getElementById('eq-ahrs');
-        if (qEl && !qEl.value) qEl.value = match.quarterly_hours || '';
-        if (aEl && !aEl.value) aEl.value = match.annual_hours    || '';
-      }
+      const match   = findEquipType(typeVal || clsVal);
+      if (!match) return;
+      const qEl   = document.getElementById('eq-qhrs');
+      const aEl   = document.getElementById('eq-ahrs');
+      const catEl = document.querySelector('[name="category"]');
+      const tagEl = document.querySelector('[name="tag"]');
+      if (qEl   && (!qEl.value   || force)) qEl.value   = match.quarterly_hours || '';
+      if (aEl   && (!aEl.value   || force)) aEl.value   = match.annual_hours    || '';
+      if (catEl && (!catEl.value || force)) catEl.value = match.category        || '';
+      if (tagEl && !tagEl.value)            tagEl.value = match.tag_prefix       || '';
     };
 
     document.getElementById('eq-autofill-btn').onclick = () => {
       const typeVal = document.querySelector('[name="equipment_type"]')?.value;
       const clsVal  = document.querySelector('[name="equipment_class"]')?.value;
-      const match   = findEquipType(clsVal || typeVal);
+      const match   = findEquipType(typeVal || clsVal);
       if (match) {
-        document.getElementById('eq-qhrs').value = match.quarterly_hours || '';
-        document.getElementById('eq-ahrs').value = match.annual_hours    || '';
-        notify.info(`Hours loaded: ${match.equipment_type}`);
+        fillFromLibrary(true);
+        notify.info(`Auto-filled: ${match.equipment_type} (${match.category})`);
       } else {
-        notify.warn('No library match found for this equipment type.');
+        notify.warn('No library match found. Enter values manually.');
       }
     };
 
-    document.querySelector('[name="equipment_class"]')?.addEventListener('change', fillHours);
-    document.querySelector('[name="equipment_type"]')?.addEventListener('change', fillHours);
+    document.querySelector('[name="equipment_class"]')?.addEventListener('change', () => fillFromLibrary(false));
+    document.querySelector('[name="equipment_type"]')?.addEventListener('change', () => fillFromLibrary(false));
   },
 
   async saveEquipment(id) {

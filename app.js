@@ -1,5 +1,5 @@
 // js/app.js — application bootstrap
-import { CONFIG }     from './config.js';
+import { CONFIG, syncConfigFromEquipmaster } from './config.js';
 import { initDB }     from './db.js';
 import { register, start, navigate } from './router.js';
 import { Auth, showAuthScreen, hideAuthScreen, renderUserBadge } from './auth.js';
@@ -109,32 +109,50 @@ function wireTopbar() {
 // ─── Auth guard + boot ──────────────────────────────────────────────────────
 async function boot() {
   try { initDB(); } catch(e) { console.warn("DB init failed:", e.message); }
+  // Sync CONFIG lists from EQUIPMASTER dataset
+  try {
+    const { EQUIPMASTER } = await import('./equipmaster.js');
+    syncConfigFromEquipmaster(EQUIPMASTER);
+  } catch(e) { console.warn("EQUIPMASTER sync failed:", e.message); }
   renderSidebarLogo();
   renderNav();
   registerRoutes();
   wireTopbar();
 
   // Listen for auth state changes (sign-in from magic link click)
+  let _routerStarted = false;
   Auth.onAuthChange((event, session) => {
+    console.log('[auth] onAuthChange:', event, session ? 'session' : 'no session');
     if (session) {
       hideAuthScreen();
       renderUserBadge(session.user);
+      if (!_routerStarted) {
+        _routerStarted = true;
+        start();
+        syncNav();
+        window.addEventListener('hashchange', syncNav);
+      }
     } else {
       showAuthScreen();
     }
   });
 
-  // Check existing session — if present, start immediately
+  // Check existing session before starting router
   const session = await Auth.getSession();
+  console.log('[auth] boot session:', session ? 'found' : 'none');
+
   if (session) {
+    // Valid session — hide auth screen and start app
     hideAuthScreen();
     renderUserBadge(session.user);
+    start();
+    syncNav();
+    window.addEventListener('hashchange', syncNav);
+  } else {
+    // No session — show auth screen, do NOT start router yet
+    showAuthScreen();
+    // onAuthChange above will call start() when SIGNED_IN fires
   }
-  // Always start router — it will render once hash resolves
-  // onAuthChange above handles hiding auth screen when magic link fires
-  start();
-  syncNav();
-  window.addEventListener('hashchange', syncNav);
 }
 
 document.addEventListener('DOMContentLoaded', boot);

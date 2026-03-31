@@ -33,7 +33,7 @@ export const Buildings = {
   async getById(id) {
     const { data, error } = await _sb
       .from('buildings')
-      .select('*, equipment(*)')
+      .select('*')
       .eq('id', id)
       .single();
     if (error) throw error;
@@ -70,18 +70,22 @@ export const Equipment = {
     const { data, error } = await _sb
       .from('equipment')
       .select('*, buildings(name)')
+      .order('building_id')
+      .order('service_area')
       .order('tag');
     if (error) throw error;
-    return data;
+    return data || [];
   },
   async getByBuilding(buildingId) {
     const { data, error } = await _sb
       .from('equipment')
       .select('*')
       .eq('building_id', buildingId)
+      .order('service_area')
+      .order('category')
       .order('tag');
     if (error) throw error;
-    return data;
+    return data || [];
   },
   async getById(id) {
     const { data, error } = await _sb
@@ -510,5 +514,32 @@ export const UserSettings = {
       .single();
     if (error) throw error;
     return data;
+  },
+};
+
+// ── Equipment Master Sync ─────────────────────────────────────────────────────
+export const EquipmentMasterSync = {
+  // Upsert all manufacturers from EQUIPMASTER into equipment_manufacturers table
+  async seedManufacturers(manufacturers) {
+    const rows = manufacturers.map(name => ({ name }));
+    const CHUNK = 100;
+    let count = 0;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const { error } = await _sb
+        .from('equipment_manufacturers')
+        .upsert(rows.slice(i, i + CHUNK), { onConflict: 'name', ignoreDuplicates: true });
+      if (!error) count += Math.min(CHUNK, rows.length - i);
+    }
+    return count;
+  },
+
+  // Get all manufacturers for dropdown
+  async getManufacturers() {
+    const { data, error } = await _sb
+      .from('equipment_manufacturers')
+      .select('name')
+      .order('name');
+    if (error) return [];
+    return (data || []).map(r => r.name);
   },
 };

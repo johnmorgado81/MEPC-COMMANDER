@@ -4,7 +4,7 @@
 
 import { Proposals as DB, Buildings as BuildingsDB, Equipment as EquipDB } from './db.js';
 import { CONFIG, calcPMSellPrice } from './config.js';
-import { EQUIPMASTER, findEquipType, getStdHours, CATEGORIES } from './equipmaster.js';
+import { EQUIPMASTER, EQUIPMASTER_MANUFACTURERS, findEquipType, getStdHours, getEquipDefaults, CATEGORIES } from './equipmaster.js';
 import { getScopeText } from './scope-library.js';
 import { generateProposalPDFEnhanced } from './pdf-export.js';
 import { formatCurrency, today, addDays, pad } from './helpers.js';
@@ -374,15 +374,17 @@ function _renderRawEquipTable() {
   return `<div class="table-scroll"><table class="table" id="raw-equip-table">
     <thead><tr><th>Type / Description</th><th>Tag</th><th>Make</th><th>Model</th><th style="width:60px">Qty</th><th>Location</th><th style="width:32px"></th></tr></thead>
     <tbody>${S.rawEquipment.map((e,i) => `<tr>
-      <td><input class="raw-inp" data-i="${i}" data-f="type" value="${e.type||''}" placeholder="e.g. Hot Water Boiler"></td>
+      <td><input class="raw-inp" data-i="${i}" data-f="type" value="${e.type||''}" placeholder="e.g. Hot Water Boiler" list="wiz-type-dl" autocomplete="off"></td>
       <td><input class="raw-inp" data-i="${i}" data-f="tag"  value="${e.tag||''}"  placeholder="B-1" style="width:70px"></td>
-      <td><input class="raw-inp" data-i="${i}" data-f="manufacturer" value="${e.manufacturer||''}" style="width:90px"></td>
+      <td><input class="raw-inp" data-i="${i}" data-f="manufacturer" value="${e.manufacturer||''}" style="width:90px" list="wiz-mfr-dl" autocomplete="off"></td>
       <td><input class="raw-inp" data-i="${i}" data-f="model" value="${e.model||''}" style="width:90px"></td>
       <td><input class="raw-inp" type="number" data-i="${i}" data-f="qty" value="${e.qty||1}" min="1" style="width:52px"></td>
       <td><input class="raw-inp" data-i="${i}" data-f="location" value="${e.location||''}"></td>
       <td><button class="btn btn-xs btn-danger raw-del" data-i="${i}">✕</button></td>
     </tr>`).join('')}</tbody>
-  </table></div>`;
+  </table></div>
+  <datalist id="wiz-type-dl">${EQUIPMASTER.map(e => `<option value="${e.equipment_type}">`).join('')}</datalist>
+  <datalist id="wiz-mfr-dl">${EQUIPMASTER_MANUFACTURERS.slice(0,200).map(m => `<option value="${m}">`).join('')}</datalist>`;
 }
 
 function _bindRawTable() {
@@ -686,10 +688,12 @@ function _renderNormTable() {
       </tr></thead>
       <tbody>${S.normalized.map((n,i) => `<tr class="${n.conf==='unknown'?'row-review':''}">
         <td>${n.type}</td>
-        <td>${n.equipmaster || `<select class="norm-match-sel" data-i="${i}" style="font-size:12px">`+
-          `<option value="">— Select —</option>`+
-          EQUIPMASTER.map(e=>`<option value="${e.equipment_type}" ${n.equipmaster===e.equipment_type?'selected':''}>${e.equipment_type} (${e.category})</option>`).join('')+
-          `</select>`}</td>
+        <td>
+          <input class="norm-match-inp" data-i="${i}" style="font-size:12px;width:180px"
+            list="wiz-norm-dl" autocomplete="off"
+            value="${n.equipmaster || ''}"
+            placeholder="${n.conf==='unknown' ? '⚠ Unknown — select' : n.equipmaster || ''}">
+        </td>
         <td>${confBadge(n.conf)}</td>
         <td><input class="norm-inp" data-i="${i}" data-f="category" value="${n.category||''}" style="width:80px;font-size:12px"></td>
         <td><input class="norm-inp" type="number" data-i="${i}" data-f="qty" value="${n.qty||1}" min="1" style="width:50px"></td>
@@ -700,6 +704,7 @@ function _renderNormTable() {
       <tfoot><tr><td colspan="6" style="text-align:right;font-weight:700">Total Annual (estimated)</td>
         <td style="font-weight:700">${formatCurrency(total)}</td></tr></tfoot>
     </table>
+    <datalist id="wiz-norm-dl">${EQUIPMASTER.map(e => `<option value="${e.equipment_type}">${e.equipment_type} (${e.category})</option>`).join('')}</datalist>
   </div>`;
 }
 
@@ -707,14 +712,24 @@ function _bindNormTable() {
   document.querySelectorAll('.norm-del').forEach(btn => {
     btn.onclick = () => { _saveNormTable(); S.normalized.splice(Number(btn.dataset.i),1); document.getElementById('norm-table-wrap').innerHTML = _renderNormTable(); _bindNormTable(); };
   });
-  document.querySelectorAll('.norm-match-sel').forEach(sel => {
-    sel.onchange = () => {
-      const i = Number(sel.dataset.i);
+  document.querySelectorAll('.norm-match-inp').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const i = Number(inp.dataset.i);
       _saveNormTable();
-      const match = findEquipType(sel.value);
-      if (match) { S.normalized[i].equipmaster = match.equipment_type; S.normalized[i].category = match.category||''; S.normalized[i].qtrHrs = match.quarterly_hours||1; S.normalized[i].annHrs = match.annual_hours||4; S.normalized[i].conf = 'strong'; S.normalized[i].annual_price = _calcPrice(S.normalized[i]); }
-      document.getElementById('norm-table-wrap').innerHTML = _renderNormTable(); _bindNormTable();
-    };
+      const match = findEquipType(inp.value);
+      if (match) {
+        Object.assign(S.normalized[i], {
+          equipmaster: match.equipment_type,
+          category:    match.category || '',
+          qtrHrs:      match.quarterly_hours || 1,
+          annHrs:      match.annual_hours    || 4,
+          conf:        'strong',
+        });
+        S.normalized[i].annual_price = _calcPrice(S.normalized[i]);
+      }
+      document.getElementById('norm-table-wrap').innerHTML = _renderNormTable();
+      _bindNormTable();
+    });
   });
 }
 

@@ -1,7 +1,8 @@
 // settings.js — Admin settings: rate sheet, markup matrix, XLSX upload
 // All changes persist to Supabase (markup_matrix + user_settings tables).
 
-import { MarkupMatrix, UserSettings } from './db.js';
+import { MarkupMatrix, UserSettings, EquipmentMasterSync } from './db.js';
+import { EQUIPMASTER, EQUIPMASTER_MANUFACTURERS } from './equipmaster.js';
 import { CONFIG }                      from './config.js';
 import { notify }                      from './ui.js';
 import { formatCurrency }              from './helpers.js';
@@ -17,6 +18,7 @@ export const Settings = {
         <button class="tab-btn active" data-tab="rates">Labour Rates</button>
         <button class="tab-btn" data-tab="markup">Material Markup</button>
         <button class="tab-btn" data-tab="company">Company Info</button>
+        <button class="tab-btn" data-tab="equipmaster">Equipment Master</button>
       </div>
       <div id="settings-content"></div>
     `;
@@ -34,9 +36,10 @@ export const Settings = {
 
   _loadTab(tab) {
     const el = document.getElementById('settings-content');
-    if (tab === 'rates')   this._renderRates(el);
-    if (tab === 'markup')  this._renderMarkup(el);
-    if (tab === 'company') this._renderCompany(el);
+    if (tab === 'rates')       this._renderRates(el);
+    if (tab === 'markup')      this._renderMarkup(el);
+    if (tab === 'company')     this._renderCompany(el);
+    if (tab === 'equipmaster') this._renderEquipMaster(el);
   },
 
   // ─── Labour Rates ─────────────────────────────────────────────────────────
@@ -282,6 +285,59 @@ export const Settings = {
       if (status) status.textContent = 'Import failed: ' + err.message;
       notify('Import failed: ' + err.message, 'error');
     }
+  },
+
+  // ─── Equipment Master ─────────────────────────────────────────────────────────
+  async _renderEquipMaster(el) {
+    const cats = [...new Set(EQUIPMASTER.map(e => e.category))].sort();
+    el.innerHTML = `
+      <div class="report-card">
+        <h3>Equipment Master Dataset</h3>
+        <p class="text-muted mb-16" style="font-size:13px">
+          ${EQUIPMASTER.length} types · ${EQUIPMASTER_MANUFACTURERS.length} manufacturers · ${cats.length} categories.
+          Drives all dropdowns, auto-fill, and proposal calculations.
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+          <button class="btn btn-secondary" id="em-seed-btn">↑ Seed Manufacturers to DB</button>
+          <span id="em-seed-status" class="text-muted" style="line-height:2.2"></span>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr>
+              <th>Category</th><th>Equipment Type</th><th>Tag</th>
+              <th class="text-right">Qtly Hrs</th><th class="text-right">Ann Hrs</th>
+              <th>Belt</th><th>Filter</th><th>Lubricant</th>
+            </tr></thead>
+            <tbody>
+              ${EQUIPMASTER.map(e => `<tr>
+                <td><span class="badge badge-muted">${e.category||'—'}</span></td>
+                <td>${e.equipment_type}</td>
+                <td class="text-muted">${e.tag_prefix||'—'}</td>
+                <td class="text-right">${e.quarterly_hours != null ? e.quarterly_hours : '—'}</td>
+                <td class="text-right">${e.annual_hours    != null ? e.annual_hours    : '—'}</td>
+                <td class="text-muted">${e.belt_size  ||'—'}</td>
+                <td class="text-muted">${e.filter_type||'—'}</td>
+                <td class="text-muted">${e.lubricant_type||'—'}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('em-seed-btn')?.addEventListener('click', async () => {
+      const btn    = document.getElementById('em-seed-btn');
+      const status = document.getElementById('em-seed-status');
+      btn.disabled = true; btn.textContent = 'Seeding…';
+      try {
+        const count = await EquipmentMasterSync.seedManufacturers(EQUIPMASTER_MANUFACTURERS);
+        status.textContent = `✓ ${count} manufacturers seeded.`;
+      } catch (err) {
+        status.textContent = 'Failed: ' + err.message;
+      } finally {
+        btn.disabled = false; btn.textContent = '↑ Seed Manufacturers to DB';
+      }
+    });
   },
 
   // ─── Company Info ──────────────────────────────────────────────────────────
