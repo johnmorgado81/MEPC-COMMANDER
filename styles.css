@@ -949,3 +949,25 @@ code {
   transition: all 0.15s; min-height: 60px; display: flex; align-items: center; justify-content: center;
 }
 .cover-img-zone:hover { border-color: var(--primary); }
+
+/* ─── Equipment area grouping in building detail ───────────────── */
+.equip-area-group { border-bottom: 1px solid var(--border); }
+.equip-area-group:last-child { border-bottom: none; }
+.equip-area-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px; background: var(--bg3);
+  font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.4px; color: var(--text-muted);
+}
+.table-compact td, .table-compact th { padding: 6px 10px; font-size: 12.5px; }
+.detail-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+@media (max-width: 800px) { .detail-grid-2 { grid-template-columns: 1fr; } }
+
+/* ── PM Quote MVP ────────────────────────────────────────────── */
+.sub-slot { transition: background 0.15s; }
+.sub-slot-active { background: rgba(59,130,246,0.04); }
+.link-strong { font-weight: 600; color: var(--primary); }
+.toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px; }
+.toolbar-right { display:flex; gap:8px; }
+.eq-inp { background: var(--bg3); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding:4px 6px; font-size:13px; width:100%; }
+.eq-inp:focus { outline:none; border-color:var(--primary); }
