@@ -54,6 +54,11 @@ export function openModal(titleOrOpts, bodyHtml, buttonsArr) {
   const bodyEl  = document.getElementById('modal-body');
   const footEl  = document.getElementById('modal-footer');
 
+  if (!overlay || !box || !head || !bodyEl || !footEl) {
+    console.error('openModal: required DOM elements missing. Check index.html for modal-overlay, modal-box, modal-header, modal-body, modal-footer.');
+    return;
+  }
+
   box.className = 'modal-box';
   head.innerHTML = `<span>${title}</span><button class="modal-close" id="modal-close-btn">&times;</button>`;
   bodyEl.innerHTML = body;
@@ -74,8 +79,8 @@ export function openModal(titleOrOpts, bodyHtml, buttonsArr) {
 }
 
 export function closeModal() {
-  document.getElementById('modal-overlay').setAttribute('hidden', '');
-  if (modalCloseCallback) modalCloseCallback();
+  document.getElementById('modal-overlay')?.setAttribute('hidden', '');
+  if (modalCloseCallback) { try { modalCloseCallback(); } catch {} }
   modalCloseCallback = null;
 }
 
