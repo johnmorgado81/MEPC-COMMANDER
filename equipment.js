@@ -44,15 +44,15 @@ export const Equipment = {
 
     container.innerHTML = `<div class="page-wrap">
       <div class="toolbar">
-        ${buildingId ? `<button class="btn btn-secondary btn-sm" onclick="navigate('/buildings/${buildingId}')">← ${this._building?.name || 'Building'}</button>` : ''}
+        ${buildingId ? `<button class="btn btn-secondary btn-sm" id="eq-back-btn">← ${this._building?.name || 'Building'}</button>` : ''}
         <input type="search" id="eq-search" class="input" placeholder="Search…" style="max-width:200px">
         <select id="eq-filter-area" class="input" style="max-width:180px">
           <option value="">All Areas</option>
-          ${CONFIG.SERVICE_AREAS.map(a => `<option value="${a.value}">${a.label}</option>`).join('')}
+          ${(CONFIG.SERVICE_AREAS||[]).map(a => `<option value="${a.value}">${a.label}</option>`).join('')}
         </select>
         <select id="eq-filter-cat" class="input" style="max-width:160px">
           <option value="">All Categories</option>
-          ${CONFIG.EQUIPMENT_CATEGORIES.map(c => `<option>${c}</option>`).join('')}
+          ${(CONFIG.EQUIPMENT_CATEGORIES||[]).map(c => `<option>${c}</option>`).join('')}
         </select>
         <div class="toolbar-right">
           <button class="btn btn-secondary" id="eq-export">Export CSV</button>
@@ -63,7 +63,8 @@ export const Equipment = {
     </div>`;
 
     await this.loadTable();
-if (buildingId) document.getElementById('eq-back-btn')?.addEventListener('click', () => navigate(`/buildings/${buildingId}`));
+
+    if (buildingId) document.getElementById('eq-back-btn')?.addEventListener('click', () => navigate(`/buildings/${buildingId}`));
     document.getElementById('eq-add').onclick        = () => this.openForm(null, buildingId);
     document.getElementById('eq-search').oninput     = () => this._filter();
     document.getElementById('eq-filter-area').onchange = () => this._filter();
@@ -200,7 +201,7 @@ if (buildingId) document.getElementById('eq-back-btn')?.addEventListener('click'
           <div class="form-group">
             <label>Service Area *</label>
             <select name="service_area">
-              ${CONFIG.SERVICE_AREAS.map(a => `<option value="${a.value}" ${a.value===sArea?'selected':''}>${a.label}</option>`).join('')}
+              ${(CONFIG.SERVICE_AREAS||[]).map(a => `<option value="${a.value}" ${a.value===sArea?'selected':''}>${a.label}</option>`).join('')}
             </select>
           </div>
           <div class="form-group">
@@ -212,17 +213,17 @@ if (buildingId) document.getElementById('eq-back-btn')?.addEventListener('click'
           <div class="form-group">
             <label>Equipment Type *</label>
             <input name="equipment_type" class="input" list="dl-eq-type" value="${eType}" placeholder="Select or type equipment type…" autocomplete="off">
-            <datalist id="dl-eq-type">${EQUIPMASTER.map(e => `<option value="${e.equipment_type}" data-tag="${e.tag_prefix||''}" data-cat="${e.category||''}" data-qhr="${e.quarterly_hours||''}" data-ahr="${e.annual_hours||''}">`).join('')}</datalist>
+            <datalist id="dl-eq-type">${(EQUIPMASTER||[]).map(e => `<option value="${e.equipment_type}" data-tag="${e.tag_prefix||''}" data-cat="${e.category||''}" data-qhr="${e.quarterly_hours||''}" data-ahr="${e.annual_hours||''}">`).join('')}</datalist>
           </div>
           <div class="form-group">
             <label>Equipment Class</label>
             <input name="equipment_class" class="input" list="dl-eq-cls" value="${eCls}" placeholder="Select or type class…" autocomplete="off">
-            <datalist id="dl-eq-cls">${CONFIG.EQUIPMENT_CLASSES.map(c => `<option value="${c}">`).join('')}</datalist>
+            <datalist id="dl-eq-cls">${(CONFIG.EQUIPMENT_CLASSES||[]).map(c => `<option value="${c}">`).join('')}</datalist>
           </div>
           <div class="form-group">
             <label>Category</label>
             <input name="category" class="input" list="dl-eq-cat" value="${eCat}" placeholder="Select or type category…" autocomplete="off">
-            <datalist id="dl-eq-cat">${EQUIPMASTER_CATEGORIES.map(c => `<option value="${c}">`).join('')}</datalist>
+            <datalist id="dl-eq-cat">${(EQUIPMASTER_CATEGORIES||[]).map(c => `<option value="${c}">`).join('')}</datalist>
           </div>
         </div>
         <div class="form-row">
@@ -243,7 +244,7 @@ if (buildingId) document.getElementById('eq-back-btn')?.addEventListener('click'
           <div class="form-group">
             <label>Manufacturer</label>
             <input name="manufacturer" class="input" list="dl-eq-mfr" value="${existing?.manufacturer||''}" placeholder="Select or type manufacturer…" autocomplete="off">
-            <datalist id="dl-eq-mfr">${EQUIPMASTER_MANUFACTURERS.slice(0,200).map(m => `<option value="${m}">`).join('')}</datalist>
+            <datalist id="dl-eq-mfr">${(EQUIPMASTER_MANUFACTURERS||[]).slice(0,200).map(m => `<option value="${m}">`).join('')}</datalist>
           </div>
         </div>
         <div class="form-row">
@@ -346,7 +347,6 @@ if (buildingId) document.getElementById('eq-back-btn')?.addEventListener('click'
       closeModal();
       notify.success(id ? 'Equipment updated.' : 'Equipment added.');
       await this.loadTable();
-
     } catch (err) {
       notify.error(err.message);
     }
