@@ -2,57 +2,33 @@
 // Sign-in with email → Supabase sends a link → user clicks → session persists.
 // No password. No registration. Internal single-company use.
 
-import { getClient } from './db.js';
-import { CONFIG }     from './config.js';
-
-// ─── Public API ──────────────────────────────────────────────────────────────
+// ⚠ DEV BYPASS — remove before go-live
+const DEV_USER = { email: 'dev@local', id: 'dev-user' };
 
 export const Auth = {
 
-  // Returns current session or null
   async getSession() {
-    const sb = getClient();
-    const { data } = await sb.auth.getSession();
-    return data?.session ?? null;
+    return { user: DEV_USER };
   },
 
-  // Returns current user or null (no network call)
   async getUser() {
-    const sb = getClient();
-    const { data } = await sb.auth.getUser();
-    return data?.user ?? null;
+    return DEV_USER;
   },
 
-  // Send magic link to email address
   async sendMagicLink(email) {
-    const sb = getClient();
-    const { error } = await sb.auth.signInWithOtp({
-      email,
-      options: {
-        shouldCreateUser: false,  // only allow existing users — add users via Supabase Dashboard
-        emailRedirectTo: window.location.origin + '/',
-      },
-    });
-    if (error) throw error;
+    console.log('[DEV] Magic link bypass — email:', email);
   },
 
-  // Sign out — clears session from browser
   async signOut() {
-    const sb = getClient();
-    const { error } = await sb.auth.signOut();
-    if (error) throw error;
+    console.log('[DEV] Sign out bypass');
+    window.location.reload();
   },
 
-  // Listen for auth state changes (sign-in / sign-out / token refresh)
   onAuthChange(callback) {
-    const sb = getClient();
-    const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
-      callback(event, session);
-    });
-    return subscription;
+    setTimeout(() => callback('SIGNED_IN', { user: DEV_USER }), 0);
+    return { unsubscribe: () => {} };
   },
 };
-
 // ─── Auth UI ─────────────────────────────────────────────────────────────────
 
 export function showAuthScreen() {
