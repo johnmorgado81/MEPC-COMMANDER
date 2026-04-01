@@ -346,6 +346,7 @@ export const Equipment = {
       closeModal();
       notify.success(id ? 'Equipment updated.' : 'Equipment added.');
       await this.loadTable();
+if (buildingId) document.getElementById('eq-back-btn')?.addEventListener('click', () => navigate(`/buildings/${buildingId}`));
     } catch (err) {
       notify.error(err.message);
     }
