@@ -1,7 +1,10 @@
 // proposal-wizard.js — PM Quote MVP
 // Steps: Building → Equipment → Price + Subcontractors → Generate
 import { Proposals as DB, Buildings as BuildingsDB } from './db.js';
-import { CONFIG, calcPMSellPrice } from './config.js';
+import { CONFIG, calcPMSellPrice, calcPMHours } from './config.js';
+import { normalizeEquipmentRow, normalizeRawEquipment, summarizeProposal, buildSavePayload,
+         splitCombinedTags, annualSell, annualHours, subcontractSell, renderScheduleBHTML,
+         PM_QUARTERLY_VISITS } from './pm-engine.js';
 import { EQUIPMASTER, EQUIPMASTER_MANUFACTURERS, findEquipType, getStdHours, CATEGORIES } from './equipmaster.js';
 import { getScopeText } from './scope-library.js';
 import { generateProposalPDFEnhanced } from './pdf-export.js';
@@ -121,11 +124,12 @@ async function _step1(el, wiz) {
     <div id="bld-fields">${_bldFields()}</div>
 
     <div class="wiz-actions">
-      <button class="btn btn-secondary" onclick="navigate('/proposals')">Cancel</button>
+      <button class="btn btn-secondary" id="s1-cancel">Cancel</button>
       <button class="btn btn-primary" id="s1-next">Next: Equipment →</button>
     </div>
   </div>`;
 
+  document.getElementById('s1-cancel').onclick = () => navigate('/proposals');
   document.getElementById('s1-next').onclick = () => { _saveBldFields(); wiz.next(); };
 
   document.getElementById('bld-link').onchange = async (e) => {
@@ -261,21 +265,34 @@ async function _step2(el, wiz) {
   };
 
   document.getElementById('parse-files-btn').onclick = async () => {
-    const btn = document.getElementById('parse-files-btn');
+    const btn    = document.getElementById('parse-files-btn');
     const status = document.getElementById('equip-parse-status');
+    if (!S.equipFile) { if (status) status.innerHTML = `<div class="badge badge-warn">No file selected.</div>`; return; }
     btn.disabled = true; btn.textContent = 'Parsing…';
     _saveRawTable();
     try {
-      const extracted = await _parseEquipFile(S.equipFile, status);
+      const raw = await _parseEquipFile(S.equipFile, status);
+      const extracted = Array.isArray(raw) ? raw : [];
+      const reviewNeeded = extracted.filter(e => e._review).length;
       for (const item of extracted) {
-        const dup = S.rawEquipment.find(e => e.type===item.type && e.tag===item.tag);
+        const dup = S.rawEquipment.find(e =>
+          e.type === item.type && e.tag === item.tag &&
+          (item._review ? e._rowHint === item._rowHint : true)
+        );
         if (!dup) S.rawEquipment.push(item);
       }
       document.getElementById('equip-table-wrap').innerHTML = _renderRawEquipTable();
       _bindRawTable();
-      status.innerHTML = `<div class="badge badge-success">Extracted ${extracted.length} items</div>`;
+      if (status) {
+        if (!extracted.length) {
+          status.innerHTML = `<div class="badge badge-warn">No equipment found in file. Check that the file has equipment data and try again, or add rows manually.</div>`;
+        } else {
+          const reviewMsg = reviewNeeded ? ` &nbsp;⚠ ${reviewNeeded} need review (type missing).` : '';
+          status.innerHTML = `<div class="badge badge-success">Extracted ${extracted.length} items.${reviewMsg}</div>`;
+        }
+      }
     } catch (err) {
-      status.innerHTML = `<div class="badge badge-danger">Parse failed: ${err.message}</div>`;
+      if (status) status.innerHTML = `<div class="badge badge-danger">Parse failed: ${err.message}</div>`;
     } finally { btn.disabled = false; btn.textContent = '⟳ Parse File'; }
   };
 
@@ -284,23 +301,39 @@ async function _step2(el, wiz) {
 
 function _renderRawEquipTable() {
   if (!S.rawEquipment.length) return `<p class="text-muted" style="margin:.5rem 0">No equipment yet. Add rows manually or upload a file.</p>`;
-  return `<div class="table-scroll"><table class="table" id="raw-equip-table">
+  const reviewCount = S.rawEquipment.filter(e => e._review).length;
+  const reviewBanner = reviewCount
+    ? `<div class="badge badge-warn" style="margin-bottom:.5rem;display:inline-block">⚠ ${reviewCount} row${reviewCount>1?'s':''} need review — type is missing or uncertain. Set the Equipment Type before proceeding.</div>`
+    : '';
+  return `${reviewBanner}<div class="table-scroll"><table class="table" id="raw-equip-table">
     <thead><tr>
-      <th>Equipment Type</th><th>Tag</th><th>Make</th><th>Model</th>
+      <th>Equipment Type</th><th>Tag</th><th>Category</th><th>Make</th><th>Model</th>
       <th style="width:60px">Qty</th><th>Location</th><th style="width:32px"></th>
     </tr></thead>
-    <tbody>${S.rawEquipment.map((e,i) => `<tr>
-      <td><input class="raw-inp input" data-i="${i}" data-f="type" value="${e.type||''}" placeholder="e.g. Hot Water Boiler" list="wiz-type-dl" autocomplete="off"></td>
-      <td><input class="raw-inp input" data-i="${i}" data-f="tag" value="${e.tag||''}" placeholder="B-1" style="width:70px"></td>
-      <td><input class="raw-inp input" data-i="${i}" data-f="manufacturer" value="${e.manufacturer||''}" style="width:90px" list="wiz-mfr-dl" autocomplete="off"></td>
-      <td><input class="raw-inp input" data-i="${i}" data-f="model" value="${e.model||''}" style="width:90px"></td>
+    <tbody>${S.rawEquipment.map((e,i) => {
+      const cats = (CATEGORIES||[]);
+      const catOpts = cats.map(c => `<option value="${c}" ${e.category===c?'selected':''}>${c}</option>`).join('');
+      return `<tr style="${e._review ? 'background:#fffbeb;' : ''}">
+      <td>
+        ${e._review && e._rowHint ? `<div style="font-size:10px;color:#92400e;margin-bottom:2px" title="${(e._rowHint||'').replace(/"/g,'&quot;')}">⚠ ${(e._rowHint||'').slice(0,50)}</div>` : ''}
+        <input class="raw-inp input" data-i="${i}" data-f="type" value="${(e.type||'').replace(/"/g,'&quot;')}" placeholder="Select or type equipment type" list="wiz-type-dl" autocomplete="off" style="${e._review&&!e.type?'border-color:#f59e0b;':''}">
+      </td>
+      <td><input class="raw-inp input" data-i="${i}" data-f="tag" value="${(e.tag||'').replace(/"/g,'&quot;')}" placeholder="B-1" style="width:70px"></td>
+      <td>
+        <select class="raw-inp input" data-i="${i}" data-f="category" style="font-size:12px;width:110px">
+          <option value="">— Category —</option>
+          ${catOpts}
+        </select>
+      </td>
+      <td><input class="raw-inp input" data-i="${i}" data-f="manufacturer" value="${(e.manufacturer||'').replace(/"/g,'&quot;')}" style="width:90px" list="wiz-mfr-dl" autocomplete="off"></td>
+      <td><input class="raw-inp input" data-i="${i}" data-f="model" value="${(e.model||'').replace(/"/g,'&quot;')}" style="width:90px"></td>
       <td><input class="raw-inp input" type="number" data-i="${i}" data-f="qty" value="${e.qty||1}" min="1" style="width:52px"></td>
-      <td><input class="raw-inp input" data-i="${i}" data-f="location" value="${e.location||''}"></td>
+      <td><input class="raw-inp input" data-i="${i}" data-f="location" value="${(e.location||'').replace(/"/g,'&quot;')}"></td>
       <td><button class="btn btn-xs btn-danger raw-del" data-i="${i}">✕</button></td>
-    </tr>`).join('')}</tbody>
+    </tr>`;}).join('')}</tbody>
   </table></div>
-  <datalist id="wiz-type-dl">${EQUIPMASTER.map(e => `<option value="${e.equipment_type}">`).join('')}</datalist>
-  <datalist id="wiz-mfr-dl">${EQUIPMASTER_MANUFACTURERS.slice(0,200).map(m => `<option value="${m}">`).join('')}</datalist>`;
+  <datalist id="wiz-type-dl">${(EQUIPMASTER||[]).map(e => `<option value="${e.equipment_type}">`).join('')}</datalist>
+  <datalist id="wiz-mfr-dl">${(EQUIPMASTER_MANUFACTURERS||[]).slice(0,200).map(m => `<option value="${m}">`).join('')}</datalist>`;
 }
 
 function _bindRawTable() {
@@ -312,12 +345,31 @@ function _bindRawTable() {
       _bindRawTable();
     };
   });
+  // Auto-fill category when type is chosen from datalist
+  document.querySelectorAll('.raw-inp[data-f="type"]').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const i = Number(inp.dataset.i);
+      const match = findEquipType(inp.value);
+      if (match && S.rawEquipment[i] && !S.rawEquipment[i].category) {
+        S.rawEquipment[i].type     = inp.value;
+        S.rawEquipment[i].category = match.category || '';
+        S.rawEquipment[i]._review  = false;
+        // Update the category select in the same row without full re-render
+        const row = inp.closest('tr');
+        const catSel = row?.querySelector('select[data-f="category"]');
+        if (catSel) catSel.value = match.category || '';
+      }
+    });
+  });
 }
 
 function _saveRawTable() {
   document.querySelectorAll('.raw-inp').forEach(inp => {
     const i = Number(inp.dataset.i), f = inp.dataset.f;
-    if (S.rawEquipment[i]) S.rawEquipment[i][f] = f === 'qty' ? Number(inp.value)||1 : inp.value;
+    if (!S.rawEquipment[i]) return;
+    S.rawEquipment[i][f] = f === 'qty' ? Number(inp.value)||1 : inp.value;
+    // Clear review flag once the user has set a type
+    if (f === 'type' && inp.value.trim()) S.rawEquipment[i]._review = false;
   });
 }
 
@@ -330,21 +382,97 @@ async function _parseEquipFile(file, statusEl) {
   throw new Error(`Unsupported file type: .${ext}`);
 }
 
+// ─── Flexible column detection for XLSX ──────────────────────────────────────
+// Normalises a header string: lowercase, strip punctuation/spaces
+function _normHeader(h) { return String(h||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
+
+// Score a normalised header against a concept's known aliases
+const COL_ALIASES = {
+  type:         ['equipmenttype','type','equipment','description','desc','item','equip','equiptype','unittype','assettype','name','itemdescription'],
+  tag:          ['tag','id','unit','unitid','equipid','assetid','tagno','tagnumber','number','equiptag','label','unitno'],
+  manufacturer: ['manufacturer','make','brand','mfr','mfg','vendor','maker'],
+  model:        ['model','modelnumber','modelno','series','partnumber'],
+  qty:          ['qty','quantity','count','units','number','num','amount'],
+  location:     ['location','area','floor','room','zone','space','site','position','where','loc'],
+};
+
+function _detectColumns(headers) {
+  const norm = headers.map(h => _normHeader(h));
+  const map = {};
+  for (const [field, aliases] of Object.entries(COL_ALIASES)) {
+    // Exact alias match first
+    let idx = norm.findIndex(n => aliases.includes(n));
+    // Partial match fallback
+    if (idx === -1) idx = norm.findIndex(n => aliases.some(a => n.includes(a) || a.includes(n)));
+    if (idx !== -1 && !(idx in Object.values(map))) map[field] = headers[idx];
+  }
+  return map;
+}
+
+function _xlsxCellVal(row, key) {
+  if (!key) return '';
+  // Try exact key, then case-insensitive scan
+  if (row[key] !== undefined) return String(row[key]);
+  const kl = key.toLowerCase();
+  for (const k of Object.keys(row)) {
+    if (k.toLowerCase() === kl) return String(row[k]);
+  }
+  return '';
+}
+
+// ─── Tag splitting — P1 & P2, CH-1/CH-2, CT-1+CT-2 → individual rows ────────
+function _splitTags(tagStr) {
+  if (!tagStr) return [''];
+  const parts = tagStr.split(/\s*[&\/,+]\s*/).map(s => s.trim()).filter(Boolean);
+  return parts.length > 1 ? parts : [tagStr];
+}
+
 async function _parseXLSX(file) {
   if (!window.XLSX) throw new Error('SheetJS not loaded');
-  const buf  = await file.arrayBuffer();
-  const wb   = XLSX.read(buf, { type: 'array' });
-  const ws   = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-  return rows.map(r => ({
-    type:         r['Equipment Type'] || r['Type'] || r['equipment_type'] || r['Description'] || '',
-    tag:          r['Tag'] || r['tag'] || r['ID'] || '',
-    manufacturer: r['Make'] || r['Manufacturer'] || r['manufacturer'] || '',
-    model:        r['Model'] || r['model'] || '',
-    qty:          Number(r['Qty'] || r['Quantity'] || r['qty'] || 1),
-    location:     r['Location'] || r['location'] || r['Area'] || '',
-    source:       'xlsx',
-  })).filter(r => r.type);
+  const buf = await file.arrayBuffer();
+  const wb  = XLSX.read(buf, { type: 'array' });
+  // Try all sheets, use first that has >1 row
+  let rows = [];
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    const r  = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    if (r.length > rows.length) rows = r;
+  }
+  if (!rows.length) return [];
+
+  const headers = Object.keys(rows[0]);
+  const colMap  = _detectColumns(headers);
+
+  return rows
+    .map((r, rowIdx) => {
+      const type  = colMap.type         ? _xlsxCellVal(r, colMap.type).trim()         : '';
+      const tag   = colMap.tag          ? _xlsxCellVal(r, colMap.tag).trim()          : '';
+      const mfr   = colMap.manufacturer ? _xlsxCellVal(r, colMap.manufacturer).trim() : '';
+      const model = colMap.model        ? _xlsxCellVal(r, colMap.model).trim()        : '';
+      const loc   = colMap.location     ? _xlsxCellVal(r, colMap.location).trim()     : '';
+      const qtyRaw = colMap.qty         ? _xlsxCellVal(r, colMap.qty)                 : '1';
+      const qty   = Math.max(1, parseInt(qtyRaw, 10) || 1);
+
+      // Skip rows that are entirely blank
+      const allVals = [type, tag, mfr, model, loc].join('').trim();
+      if (!allVals) return null;
+
+      // Flag rows where type is missing so user can review
+      const needsReview = !type;
+      // If type is empty, try to use the most content-rich cell as a description hint
+      const typeVal = type || [tag, mfr, model, loc].find(v => v.length > 2) || '';
+
+      const tags = _splitTags(tag);
+      return tags.map(t => ({
+        type: typeVal,
+        tag: t, manufacturer: mfr, model, qty, location: loc,
+        source: 'xlsx',
+        _review: needsReview || false,
+        _rowHint: needsReview ? `Row ${rowIdx + 2}: ${allVals.slice(0,60)}` : '',
+      }));
+    })
+    .filter(Boolean)
+    .flat();
 }
 
 async function _parseDOCX(file) {
@@ -368,34 +496,54 @@ async function _parsePDF(file, statusEl) {
   return _extractEquipFromText(allText, 'pdf');
 }
 
-const EQUIP_VOCAB_RE = new RegExp(
-  '(' + EQUIPMASTER.map(e => e.equipment_type)
+const EQUIP_VOCAB_RE = (() => {
+  const types = (EQUIPMASTER||[]).map(e => e.equipment_type)
     .sort((a,b) => b.length - a.length)
-    .map(s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'))
-    .join('|') + ')',
-  'gi'
-);
+    .map(s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
+  return types.length ? new RegExp('(' + types.join('|') + ')', 'gi') : /(?!)/g;
+})();
 const TAG_RE = /\b([A-Z]{1,5}-?\d{1,3}[A-Z]?)\b/g;
+
+// Common mechanical keywords used for partial-match fallback
+const MECH_KEYWORDS = /\b(boiler|chiller|pump|fan|unit|coil|ahu|rtu|fcu|vfd|bas|ddc|heater|tank|valve|compressor|condenser|tower|exchanger|ventilat|exhaust|makeup|make-up|hydronic|backflow|preventer|fireplace|generator|snowmelt|pool|irrigation|separator|strainer|controller|thermostat|actuator|damper)\b/i;
 
 function _extractEquipFromText(text, source) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   const items = [], seen = new Set();
   for (const line of lines) {
+    let matched = false;
+    // Pass 1: EQUIPMASTER vocabulary match (high confidence)
     for (const m of line.matchAll(EQUIP_VOCAB_RE)) {
+      matched = true;
       const type = m[1];
-      const tags = [...line.matchAll(TAG_RE)].map(t => t[1]).filter(t => !/^(AND|THE|FOR|WITH|FROM|UNIT|EACH|TYPE)$/.test(t));
+      const tags = [...line.matchAll(TAG_RE)].map(t => t[1]).filter(t => !/^(AND|THE|FOR|WITH|FROM|UNIT|EACH|TYPE|NOTE|SEE|REF)$/.test(t));
       if (tags.length > 0) {
         tags.forEach(tag => {
           const key = type.toLowerCase() + ':' + tag;
           if (seen.has(key)) return;
           seen.add(key);
-          items.push({ type, tag, manufacturer:'', model:'', qty:1, location:'', source });
+          items.push({ type, tag, manufacturer:'', model:'', qty:1, location:'', source, _review:false });
         });
       } else {
         const key = 'untagged:' + type.toLowerCase();
         const existing = items.find(i => i.type.toLowerCase()===type.toLowerCase() && !i.tag);
-        if (existing) existing.qty++;
-        else if (!seen.has(key)) { seen.add(key); items.push({ type, tag:'', manufacturer:'', model:'', qty:1, location:'', source }); }
+        if (existing) { existing.qty++; }
+        else if (!seen.has(key)) { seen.add(key); items.push({ type, tag:'', manufacturer:'', model:'', qty:1, location:'', source, _review:false }); }
+      }
+    }
+    // Pass 2: mechanical keyword fallback — surface for review even if not in EQUIPMASTER
+    if (!matched && MECH_KEYWORDS.test(line) && line.length < 200) {
+      const tags = [...line.matchAll(TAG_RE)].map(t => t[1]).filter(t => !/^(AND|THE|FOR|WITH|FROM|UNIT|EACH|TYPE|NOTE|SEE|REF)$/.test(t));
+      const key = 'partial:' + line.slice(0,40).toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        items.push({
+          type: '',
+          tag: tags[0] || '',
+          manufacturer: '', model: '', qty: 1, location: '',
+          source, _review: true,
+          _rowHint: line.slice(0, 80),
+        });
       }
     }
   }
@@ -446,7 +594,11 @@ async function _step3(el, wiz) {
 
   document.getElementById('wiz-freq').onchange = e => {
     S.frequency = e.target.value;
-    S.normalized.forEach(n => { n.frequency = S.frequency; n.annual_price = _calcPrice(n); });
+    S.normalized.forEach(n => {
+      n.frequency = S.frequency;
+      n.annual_total_hours = calcPMHours(n.qtrHrs, n.annHrs, n.qty||1);
+      n.annual_price = calcPMSellPrice(n.annual_total_hours);
+    });
     document.getElementById('norm-table-wrap').innerHTML = _renderNormTable();
     _bindNormTable();
     _refreshTotals();
@@ -454,7 +606,10 @@ async function _step3(el, wiz) {
 
   document.getElementById('recalc-btn').onclick = () => {
     _saveNormTable();
-    S.normalized.forEach(n => { n.annual_price = _calcPrice(n); });
+    S.normalized.forEach(n => {
+      n.annual_total_hours = calcPMHours(n.qtrHrs, n.annHrs, n.qty||1);
+      n.annual_price = calcPMSellPrice(n.annual_total_hours);
+    });
     document.getElementById('norm-table-wrap').innerHTML = _renderNormTable();
     _bindNormTable();
     _refreshTotals();
@@ -464,34 +619,15 @@ async function _step3(el, wiz) {
   _bindSubSlots();
 }
 
-// ─── Equipment pricing table ──────────────────────────────────────────────────
+// ─── Delegate to pm-engine — no independent pricing math ─────────────────────
 function _normalizeItem(raw) {
-  const match = findEquipType(raw.type);
-  let conf = 'unknown', qtrHrs = 1.0, annHrs = 4.0, category = 'Other', equipmaster = null;
-  if (match) {
-    equipmaster = match.equipment_type;
-    category    = match.category || 'Other';
-    qtrHrs      = match.quarterly_hours || 1.0;
-    annHrs      = match.annual_hours    || 4.0;
-    conf = match.equipment_type.toLowerCase() === (raw.type||'').toLowerCase() ? 'exact' : 'strong';
-  } else {
-    const words = (raw.type||'').toLowerCase().split(/\s+/).filter(w => w.length > 3);
-    const partial = words.length ? EQUIPMASTER.find(e => words.some(w => e.equipment_type.toLowerCase().includes(w))) : null;
-    if (partial) {
-      equipmaster = partial.equipment_type; category = partial.category;
-      qtrHrs = partial.quarterly_hours||1; annHrs = partial.annual_hours||4; conf = 'review';
-    }
-  }
-  const n = { ...raw, equipmaster, conf, category, qtrHrs, annHrs, frequency: S.frequency };
-  n.annual_price = _calcPrice(n);
-  return n;
+  return normalizeEquipmentRow(raw, S.frequency);
 }
-
 function _calcPrice(n) {
-  const freqObj    = CONFIG.FREQUENCIES.find(f => f.value === n.frequency) || { visits: 4 };
-  const hrsPerVisit = n.frequency === 'annual' ? n.annHrs : n.frequency === 'semi-annual' ? (n.annHrs/2) : n.qtrHrs;
-  const totalHrs   = hrsPerVisit * freqObj.visits * (n.qty || 1);
-  return calcPMSellPrice(totalHrs);
+  return annualSell(annualHours(n.qtrHrs, n.annHrs, n.qty || 1));
+}
+function _calcAnnualHours(n) {
+  return annualHours(n.qtrHrs, n.annHrs, n.qty || 1);
 }
 
 function _renderNormTable() {
@@ -514,7 +650,7 @@ function _renderNormTable() {
         <td><button class="btn btn-xs btn-danger norm-del" data-i="${i}">✕</button></td>
       </tr>`).join('')}</tbody>
     </table>
-    <datalist id="wiz-norm-dl">${EQUIPMASTER.map(e => `<option value="${e.equipment_type}">${e.equipment_type} (${e.category})</option>`).join('')}</datalist>
+    <datalist id="wiz-norm-dl">${(EQUIPMASTER||[]).map(e => `<option value="${e.equipment_type}">${e.equipment_type} (${e.category})</option>`).join('')}</datalist>
   </div>`;
 }
 
@@ -535,7 +671,8 @@ function _bindNormTable() {
       const match = findEquipType(inp.value);
       if (match) {
         Object.assign(S.normalized[i], { equipmaster: match.equipment_type, category: match.category||'', qtrHrs: match.quarterly_hours||1, annHrs: match.annual_hours||4, conf: 'strong' });
-        S.normalized[i].annual_price = _calcPrice(S.normalized[i]);
+        S.normalized[i].annual_total_hours = calcPMHours(S.normalized[i].qtrHrs, S.normalized[i].annHrs, S.normalized[i].qty||1);
+        S.normalized[i].annual_price = calcPMSellPrice(S.normalized[i].annual_total_hours);
       }
       document.getElementById('norm-table-wrap').innerHTML = _renderNormTable();
       _bindNormTable();
@@ -558,7 +695,7 @@ function _saveNormTable() {
 }
 
 // ─── Subcontractor slots ──────────────────────────────────────────────────────
-const DEFAULT_MARKUP = 15; // %
+const DEFAULT_MARKUP = 25; // % — locked at 25% per business rules
 
 function _renderSubSlots() {
   return `<table class="table" id="sub-table">
@@ -612,8 +749,7 @@ function _subTotal() {
   return SUB_SLOTS.reduce((sum, slot) => {
     const s = S.subSlots[slot.key];
     if (!s || !s.sub_cost) return sum;
-    const markup = s.markup_pct != null ? s.markup_pct : DEFAULT_MARKUP;
-    return sum + +(Number(s.sub_cost) * (1 + markup/100)).toFixed(2);
+    return sum + calcSubSell(Number(s.sub_cost));
   }, 0);
 }
 
@@ -621,20 +757,32 @@ function _equipTotal() {
   return S.normalized.reduce((s,n) => s + Number(n.annual_price||0), 0);
 }
 
+function _getSubSlotItems() {
+  return SUB_SLOTS
+    .filter(slot => S.subSlots[slot.key]?.sub_cost > 0)
+    .map(slot => {
+      const s = S.subSlots[slot.key];
+      return { label: slot.label, sub_cost: Number(s.sub_cost)||0, recurring: 'annual' };
+    });
+}
+
+function _subTotal() {
+  return _getSubSlotItems().reduce((s,i) => s + subcontractSell(i.sub_cost), 0);
+}
+
 function _renderPricingTotals() {
   const equip = _equipTotal();
   const sub   = _subTotal();
   const total = equip + sub;
   const tax   = total * CONFIG.TAX_RATE;
-  const freqObj = CONFIG.FREQUENCIES.find(f => f.value === S.frequency) || { visits: 4 };
   return `<div class="totals-grid" style="max-width:380px;border:1px solid var(--border);border-radius:6px;padding:.75rem">
     <div class="totals-row"><span>Equipment PM (Labour)</span><strong>${formatCurrency(equip)}</strong></div>
     <div class="totals-row"><span>Subcontracted Services</span><strong>${formatCurrency(sub)}</strong></div>
-    <div class="totals-row totals-row-bold"><span>Subtotal (Annual)</span><strong>${formatCurrency(total)}</strong></div>
+    <div class="totals-row totals-row-bold"><span>Recurring Annual Subtotal</span><strong>${formatCurrency(total)}</strong></div>
     <div class="totals-row"><span>GST (5%)</span><strong>${formatCurrency(tax)}</strong></div>
     <div class="totals-row totals-row-bold"><span>Total Annual (incl. GST)</span><strong>${formatCurrency(total + tax)}</strong></div>
-    <div class="totals-row"><span>Monthly Billing (incl. GST)</span><strong>${formatCurrency((total + tax)/12)}</strong></div>
-    <div class="totals-row"><span>Per Visit (${freqObj.visits} visits/yr)</span><strong>${formatCurrency(freqObj.visits > 0 ? total/freqObj.visits : 0)}</strong></div>
+    <div class="totals-row totals-row-bold"><span>Monthly Billing (incl. GST)</span><strong>${formatCurrency((total + tax)/12)}</strong></div>
+    <div class="totals-row"><span>Per Visit (${PM_QUARTERLY_VISITS} visits/yr)</span><strong>${formatCurrency(PM_QUARTERLY_VISITS > 0 ? total/PM_QUARTERLY_VISITS : 0)}</strong></div>
   </div>`;
 }
 
@@ -665,7 +813,7 @@ async function _step4(el, wiz) {
       <div class="review-block">
         <h4>Scope</h4>
         <p>${S.normalized.length} equipment item${S.normalized.length !== 1 ? 's' : ''}</p>
-        <p class="text-muted">${freqObj.label||S.frequency} — ${freqObj.visits} visit${freqObj.visits !== 1 ? 's' : ''}/yr</p>
+        <p class="text-muted">${freqObj.label||S.frequency} — ${S.frequency==='quarterly'?PM_QUARTERLY_VISITS:freqObj.visits} visit${freqObj.visits !== 1 ? 's' : ''}/yr</p>
         ${S.normalized.filter(n=>n.conf==='unknown').length ? `<p class="text-warn">⚠ ${S.normalized.filter(n=>n.conf==='unknown').length} unmatched items</p>` : ''}
         ${_subTotal() > 0 ? `<p class="text-muted">${SUB_SLOTS.filter(s => S.subSlots[s.key]?.sub_cost > 0).length} subcontracted service${SUB_SLOTS.filter(s => S.subSlots[s.key]?.sub_cost > 0).length !== 1 ? 's' : ''}</p>` : ''}
       </div>
@@ -750,31 +898,29 @@ function _saveMeta() {
 async function _saveProposal(exportPdf) {
   const equipAnnual = _equipTotal();
   const subAnnual   = _subTotal();
-  const annual      = equipAnnual + subAnnual;
-  const freqObj     = CONFIG.FREQUENCIES.find(f => f.value === S.frequency) || { visits: 4, label: S.frequency };
+  const equipAnnual = _equipTotal();
   const num         = 'P-' + String(Date.now()).slice(-5);
   if (!S.building.name) S.building.name = 'Draft — ' + today();
 
-  // Build subcontractor_items (internal record — never shown on client PDF)
-  const subcontractorItems = SUB_SLOTS
-    .filter(slot => S.subSlots[slot.key]?.sub_cost > 0)
-    .map(slot => {
-      const s = S.subSlots[slot.key];
-      const markup = s.markup_pct != null ? s.markup_pct : DEFAULT_MARKUP;
-      const sell   = +(Number(s.sub_cost) * (1 + markup/100)).toFixed(2);
-      return { key: slot.key, label: slot.label, sub_cost: Number(s.sub_cost), markup_pct: markup, sell_price: sell };
-    });
+  // Build subcontractor_items via engine (internal — never shown on client PDF)
+  const subcontractorItems = _getSubSlotItems().map(i => ({
+    ...i, markup_pct: DEFAULT_MARKUP,
+    sell_price: subcontractSell(i.sub_cost),
+  }));
 
-  // Equipment-based scope items for PDF
+  // Equipment-based scope items
   const scopeItems = S.normalized.map(n => ({
-    equipment_id:   null,
-    tag:            n.tag || '',
-    equipment_type: n.equipmaster || n.type || 'Equipment',
-    frequency:      n.frequency || S.frequency,
-    annual_price:   Number(n.annual_price) || 0,
-    qty:            Number(n.qty) || 1,
-    category:       n.category || 'Other',
-    confidence:     n.conf,
+    equipment_id:           null,
+    tag:                    n.tag || '',
+    equipment_type:         n.equipmaster || n.type || 'Equipment',
+    frequency:              n.frequency || S.frequency,
+    annual_price:           Number(n.annual_price) || 0,
+    annual_total_hours:     Number(n.annual_total_hours) || 0,
+    qty:                    Number(n.qty) || 1,
+    category:               n.category || 'Other',
+    confidence:             n.conf,
+    override_quarterly_hours: n.qtrHrs,
+    override_annual_hours:    n.annHrs,
     scope_lines: (() => {
       const lines = getScopeText(n.equipmaster || n.type, n.frequency || S.frequency);
       if (lines && lines.length) return lines;
@@ -787,37 +933,31 @@ async function _saveProposal(exportPdf) {
     })(),
   }));
 
-  // Subcontracted services as scope items (sell price only — no cost/markup)
+  // Subcontracted services as scope items (sell price only — internal cost never included)
   const subScopeItems = subcontractorItems.map(s => ({
-    equipment_id:   null,
-    tag:            '',
-    equipment_type: s.label,
-    frequency:      S.frequency,
-    annual_price:   s.sell_price,
-    qty:            1,
-    category:       'Subcontracted Services',
-    confidence:     'manual',
-    scope_lines:    [`${s.label} — included in contract scope at quoted schedule`],
+    equipment_id: null, tag: '',
+    equipment_type: s.label, frequency: S.frequency,
+    annual_price: s.sell_price, qty: 1,
+    category: 'Subcontracted Services', confidence: 'manual',
+    scope_lines: [`${s.label} — included in contract scope at quoted schedule`],
   }));
 
-  const rec = {
-    proposal_number:     num,
-    title:               S.title || _buildDefaultTitle(),
-    status:              'draft',
-    created_date:        today(),
-    valid_until:         addDays(today(), CONFIG.PROPOSAL_VALID_DAYS),
-    frequency:           S.frequency,
-    visits_per_year:     freqObj.visits,
-    annual_value:        annual,
-    monthly_value:       annual / 12,
-    payment_terms:       S.paymentTerms || 'Net 30',
-    scope_items:         [...scopeItems, ...subScopeItems],
-    notes:               S.notes,
-    subcontractor_items: subcontractorItems,   // internal — not shown on PDF
-    cover_image_url:     null,
-    raw_intake:          { building: S.building, rawEquipment: S.rawEquipment, frequency: S.frequency },
-    is_draft:            !exportPdf,
-  };
+  const allScopeItems = [...scopeItems, ...subScopeItems];
+
+  // Use engine to build correct save payload — visits_per_year = 3 for quarterly
+  const rec = buildSavePayload({
+    proposal_number:  num,
+    title:            S.title || _buildDefaultTitle(),
+    status:           'draft',
+    created_date:     today(),
+    valid_until:      addDays(today(), CONFIG.PROPOSAL_VALID_DAYS),
+    frequency:        S.frequency,
+    payment_terms:    S.paymentTerms || 'Net 30',
+    notes:            S.notes,
+    cover_image_url:  null,
+    raw_intake:       { building: S.building, rawEquipment: S.rawEquipment, frequency: S.frequency },
+    is_draft:         !exportPdf,
+  }, allScopeItems, subcontractorItems);
 
   // Upsert building record
   if (S.building.building_id) {

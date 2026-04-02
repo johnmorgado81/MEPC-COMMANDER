@@ -6,8 +6,8 @@
 // See docs/setup.md for step-by-step instructions.
 
 export const CONFIG = {
-  SUPABASE_URL:      'https://gcytixguuxluijriosrm.supabase.co',
-  SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdjeXRpeGd1dXhsdWlqcmlvc3JtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2NzgyMDgsImV4cCI6MjA5MDI1NDIwOH0.Jb81RCpCE-dYB2b-H6Pw22gxXtggBqhIBjoqVmcSMf8',
+  SUPABASE_URL:      'YOUR_SUPABASE_URL',
+  SUPABASE_ANON_KEY: 'YOUR_SUPABASE_ANON_KEY',
 
   APP_NAME: 'MEPC Commander',
   VERSION:  '1.1.0',
@@ -32,7 +32,7 @@ export const CONFIG = {
     weekday_hourly:  115.00,
     weekend_callout: 260.00,
     weekend_hourly:  230.00,
-    pm_hourly:       115.00,
+    pm_hourly:       152.00,   // Locked sell rate — do not change without business approval
     minimum_hours:   2,
   },
 
@@ -51,8 +51,13 @@ export const CONFIG = {
 
   PROPOSAL_VALID_DAYS: 30,
   QUOTE_VALID_DAYS:    30,
-  PM_OVERHEAD_PCT:     0.30,
-  PM_MARGIN_PCT:       0.20,
+  PM_OVERHEAD_PCT:     0.00,
+  PM_MARGIN_PCT:       0.00,
+  SUBCONTRACT_MARKUP:  0.25,
+  // PM Service Structure — 3 quarterly visits + 1 annual service
+  // visits_per_year for PM proposals = 3 (not 4)
+  PM_QUARTERLY_VISITS: 3,
+  PM_ANNUAL_VISITS:    1,
 
   FREQUENCIES: [
     { value: 'monthly',     label: 'Monthly',     visits: 12 },
@@ -171,8 +176,49 @@ export function syncConfigFromEquipmaster(equipmaster) {
   CONFIG.EQUIPMENT_CATEGORIES = [...new Set(equipmaster.map(e => e.category).filter(Boolean))].sort();
 }
 
+// ─── PM Hour calculation — LOCKED: 3 quarterly visits + 1 annual service ────
+// Annual Total Hours = (QH × 3) + AH
+// This is NOT 4 quarterly visits. Do not change this formula.
+export function calcPMHours(quarterlyHrs, annualHrs, qty = 1) {
+  const qh = Number(quarterlyHrs) || 0;
+  const ah = Number(annualHrs)    || 0;
+  return +((qh * 3 + ah) * qty).toFixed(4);
+}
+
+// Annual sell price from hours at locked rate of $152/hr
 export function calcPMSellPrice(totalHours) {
-  const labourCost   = totalHours * CONFIG.LABOUR_RATES.pm_hourly;
-  const withOverhead = labourCost * (1 + CONFIG.PM_OVERHEAD_PCT);
-  return +(withOverhead / (1 - CONFIG.PM_MARGIN_PCT)).toFixed(2);
+  return +(totalHours * CONFIG.LABOUR_RATES.pm_hourly).toFixed(2);
+}
+
+// Subcontractor sell = cost × 1.25 (customer-facing only — never expose raw cost)
+export function calcSubSell(rawCost) {
+  return +(rawCost * (1 + CONFIG.SUBCONTRACT_MARKUP)).toFixed(2);
+}
+
+// ─── Number to words (for annual total in proposal) ──────────────────────────
+export function numberToWords(n) {
+  const num = Math.round(n * 100) / 100;
+  const dollars = Math.floor(num);
+  const cents   = Math.round((num - dollars) * 100);
+  const ones  = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine',
+                 'Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen',
+                 'Seventeen','Eighteen','Nineteen'];
+  const tens  = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  function chunk(n) {
+    if (n === 0) return '';
+    if (n < 20) return ones[n];
+    if (n < 100) return tens[Math.floor(n/10)] + (n%10 ? '-'+ones[n%10] : '');
+    return ones[Math.floor(n/100)] + ' Hundred' + (n%100 ? ' ' + chunk(n%100) : '');
+  }
+  function convert(n) {
+    if (n === 0) return 'Zero';
+    const parts = [];
+    if (n >= 1000000) { parts.push(chunk(Math.floor(n/1000000)) + ' Million'); n %= 1000000; }
+    if (n >= 1000)    { parts.push(chunk(Math.floor(n/1000))    + ' Thousand'); n %= 1000; }
+    if (n > 0)          parts.push(chunk(n));
+    return parts.join(' ');
+  }
+  const dollarWords = convert(dollars);
+  const centStr = cents > 0 ? ` and ${cents}/100` : '';
+  return `${dollarWords} Dollar${dollars !== 1 ? 's' : ''}${centStr}`;
 }
