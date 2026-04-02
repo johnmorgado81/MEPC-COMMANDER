@@ -6,8 +6,8 @@
 // See docs/setup.md for step-by-step instructions.
 
 export const CONFIG = {
-  SUPABASE_URL:      'YOUR_SUPABASE_URL',
-  SUPABASE_ANON_KEY: 'YOUR_SUPABASE_ANON_KEY',
+  SUPABASE_URL:      'https://gcytixguuxluijriosrm.supabase.co',
+  SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdjeXRpeGd1dXhsdWlqcmlvc3JtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2NzgyMDgsImV4cCI6MjA5MDI1NDIwOH0.Jb81RCpCE-dYB2b-H6Pw22gxXtggBqhIBjoqVmcSMf8',
 
   APP_NAME: 'MEPC Commander',
   VERSION:  '1.1.0',
