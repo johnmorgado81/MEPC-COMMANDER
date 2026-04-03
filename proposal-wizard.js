@@ -247,7 +247,11 @@ async function _step2(el, wiz) {
   </div>`;
 
   document.getElementById('s2-back').onclick = () => { _saveRawTable(); wiz.back(); };
-  document.getElementById('s2-next').onclick = () => { _saveRawTable(); S.normalized = []; wiz.next(); };
+  document.getElementById('s2-next').onclick = () => {
+    _saveRawTable();
+    _syncNormalized(); // preserve edits; only normalize new rows
+    wiz.next();
+  };
   document.getElementById('add-equip-row').onclick = () => {
     _saveRawTable();
     S.rawEquipment.push({ type:'', tag:'', manufacturer:'', model:'', qty:1, location:'', source:'manual' });
@@ -262,6 +266,7 @@ async function _step2(el, wiz) {
     S.equipFile = f;
     document.getElementById('file-name-label').textContent = f.name;
     document.getElementById('parse-files-btn').style.display = '';
+    document.getElementById('parse-files-btn').textContent = '⟳ Parse File';
   };
 
   document.getElementById('parse-files-btn').onclick = async () => {
@@ -274,26 +279,34 @@ async function _step2(el, wiz) {
       const raw = await _parseEquipFile(S.equipFile, status);
       const extracted = Array.isArray(raw) ? raw : [];
       const reviewNeeded = extracted.filter(e => e._review).length;
+      let added = 0;
       for (const item of extracted) {
         const dup = S.rawEquipment.find(e =>
           e.type === item.type && e.tag === item.tag &&
           (item._review ? e._rowHint === item._rowHint : true)
         );
-        if (!dup) S.rawEquipment.push(item);
+        if (!dup) { S.rawEquipment.push(item); added++; }
       }
       document.getElementById('equip-table-wrap').innerHTML = _renderRawEquipTable();
       _bindRawTable();
       if (status) {
         if (!extracted.length) {
-          status.innerHTML = `<div class="badge badge-warn">No equipment found in file. Check that the file has equipment data and try again, or add rows manually.</div>`;
+          status.innerHTML = `<div class="badge badge-warn">No equipment found. Check the file format or add rows manually.</div>`;
         } else {
-          const reviewMsg = reviewNeeded ? ` &nbsp;⚠ ${reviewNeeded} need review (type missing).` : '';
-          status.innerHTML = `<div class="badge badge-success">Extracted ${extracted.length} items.${reviewMsg}</div>`;
+          const reviewMsg = reviewNeeded ? ` ⚠ ${reviewNeeded} need review.` : '';
+          status.innerHTML = `<div class="badge badge-success">Added ${added} new rows (${extracted.length} total extracted).${reviewMsg} Select another file to import more.</div>`;
         }
       }
+      // Reset so user can immediately select another file
+      btn.textContent = '⟳ Parse Another File';
+      btn.disabled = false;
+      S.equipFile = null;
+      fileInp.value = '';
+      document.getElementById('file-name-label').textContent = '';
     } catch (err) {
       if (status) status.innerHTML = `<div class="badge badge-danger">Parse failed: ${err.message}</div>`;
-    } finally { btn.disabled = false; btn.textContent = '⟳ Parse File'; }
+      btn.disabled = false; btn.textContent = '⟳ Parse File';
+    }
   };
 
   _bindRawTable();
@@ -370,6 +383,20 @@ function _saveRawTable() {
     S.rawEquipment[i][f] = f === 'qty' ? Number(inp.value)||1 : inp.value;
     // Clear review flag once the user has set a type
     if (f === 'type' && inp.value.trim()) S.rawEquipment[i]._review = false;
+  });
+}
+
+// Merge rawEquipment with existing S.normalized — preserves edits, only normalizes new rows
+function _syncNormalized() {
+  S.normalized = S.rawEquipment.map(raw => {
+    const existing = S.normalized.find(n =>
+      n.type === raw.type && n.tag === raw.tag
+    );
+    if (existing) {
+      // Preserve pricing edits; sync qty if it changed
+      return { ...existing, qty: Number(raw.qty) || existing.qty };
+    }
+    return _normalizeItem(raw);
   });
 }
 
