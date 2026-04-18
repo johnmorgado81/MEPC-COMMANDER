@@ -100,7 +100,7 @@ export const Buildings = {
           </div>
           ${equip.length?`<div class="card-body no-pad"><div class="table-wrap"><table class="table table-compact">
             <thead><tr><th>Tag</th><th>Type</th><th>Area</th><th>Status</th></tr></thead>
-            <tbody>${equip.slice(0,12).map(e=>`<tr>
+            <tbody>${equip.map(e=>`<tr>
               <td><strong>${e.tag||'—'}</strong></td>
               <td>${e.equipment_type||'—'}</td>
               <td>${sal(e.service_area)}</td>
@@ -357,12 +357,27 @@ async function scanDocument(file) {
 
   try {
     if (['png','jpg','jpeg'].includes(ext)) {
-      if (!window.Tesseract) throw new Error('Tesseract not loaded');
-      setP(15, 'Running OCR on image…');
-      const r = await Tesseract.recognize(file, 'eng', {
-        logger: m => { if(m.status==='recognizing text') setP(15+Math.floor(m.progress*35), `OCR: ${Math.floor(m.progress*100)}%…`); }
-      });
-      text = r.data.text;
+      if (!window.Tesseract) throw new Error('Tesseract.js not loaded');
+      setP(15, 'Initialising OCR engine…');
+      let ocrWorker;
+      try {
+        ocrWorker = await Tesseract.createWorker('eng', 1, {
+          workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+          langPath:   'https://tessdata.projectnaptha.com/4.0.0',
+          corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
+          logger: m => {
+            if (m.status==='recognizing text') setP(20+Math.floor(m.progress*35), `OCR: ${Math.floor(m.progress*100)}%…`);
+            else if (m.status==='loading language traineddata') setP(10+Math.floor(m.progress*8), 'Loading language data…');
+          }
+        });
+        const { data } = await ocrWorker.recognize(file);
+        text = data.text || '';
+        await ocrWorker.terminate();
+      } catch(ocrErr) {
+        if (ocrWorker) await ocrWorker.terminate().catch(()=>{});
+        const r = await Tesseract.recognize(file, 'eng');
+        text = r.data?.text || '';
+      }
     } else if (ext === 'pdf') {
       if (!window.pdfjsLib) throw new Error('PDF.js not loaded');
       window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';

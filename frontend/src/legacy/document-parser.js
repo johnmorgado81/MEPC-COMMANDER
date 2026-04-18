@@ -209,16 +209,36 @@ function readCSV(file) {
 }
 
 async function readOCR(file) {
-  if (!window.Tesseract) throw new Error('Tesseract.js not loaded');
-  setProg(20, 'Running OCR on image — 30–60 seconds…');
-  const result = await Tesseract.recognize(file, 'eng', {
-    logger: m => {
-      if (m.status === 'recognizing text')
-        setProg(20 + Math.floor(m.progress * 35), `OCR: ${Math.floor(m.progress * 100)}%…`);
-    }
-  });
-  if (!result.data.text?.trim()) throw new Error('OCR found no readable text in image');
-  return result.data.text;
+  if (!window.Tesseract) throw new Error('Tesseract.js not loaded — check CDN in index.html');
+  setProg(15, 'Initialising OCR engine…');
+  let worker;
+  try {
+    worker = await Tesseract.createWorker('eng', 1, {
+      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+      langPath:   'https://tessdata.projectnaptha.com/4.0.0',
+      corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
+      logger: m => {
+        if (m.status === 'recognizing text')
+          setProg(20 + Math.floor(m.progress * 35), `OCR: ${Math.floor(m.progress * 100)}%…`);
+        else if (m.status === 'loading language traineddata')
+          setProg(10 + Math.floor(m.progress * 8), 'Loading OCR language data…');
+      }
+    });
+    setProg(55, 'Scanning image…');
+    const { data } = await worker.recognize(file);
+    await worker.terminate();
+    if (!data.text?.trim()) throw new Error('OCR found no readable text');
+    return data.text;
+  } catch(e) {
+    if (worker) await worker.terminate().catch(()=>{});
+    // Fallback
+    try {
+      const r = await Tesseract.recognize(file, 'eng');
+      const t = r.data?.text || '';
+      if (!t.trim()) throw new Error('OCR returned no text');
+      return t;
+    } catch { throw new Error('OCR failed: ' + e.message); }
+  }
 }
 
 async function aiExtract(rawText) {
