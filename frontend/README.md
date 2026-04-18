@@ -1,87 +1,82 @@
-# MEPC Commander — v1.1
+# MEPC Commander — v1.2
 
 Mechanical contracting PM management. Vanilla JS SPA. No build step.
 
 ## What it does
 
 - Buildings → Equipment → PM Proposals → Service Records → Deficiencies → Quotes
-- Maintenance items library (174 types from EQUIPMASTER.xlsx)
-- Proposal pricing from standard hours × labour rate
-- Material markup matrix (from Material_Markup_Matrix.xlsx)
+- Maintenance items library (174 types from EQUIPMASTER)
+- Proposal pricing from standard hours × labour rate ($152/hr sell)
+- Material markup matrix
 - Quote funnel with pending / approved / deferred / expired tracking
 - Dispatch intake with screenshot OCR (Service Fusion / Jobber)
-- Document parser: PDF, DOCX, XLSX with EQUIPMASTER-aware extraction
+- Document parser: PDF, DOCX, XLSX, CSV, image scans — AI-assisted equipment extraction
+- Address autocomplete on building forms (OpenStreetMap, no API key)
 - Reporting: revenue, equipment, deficiencies, PM compliance
-- Magic link authentication (no password)
+
+## Access
+
+No login. No password. Opens directly to dashboard.
+
+Authentication will be added in a future release prior to production launch.
 
 ## Quickstart
 
-1. Create Supabase project → run `docs/schema.sql`
-2. Put your Supabase URL + key in `js/config.js`
-3. Configure magic link email in Supabase → Authentication → Email
-4. Add your email as a user in Supabase → Authentication → Users
-5. Push to GitHub → connect to Cloudflare Pages
-6. Open app → enter email → click link in inbox
-
-Full instructions: `docs/setup.md`
+1. Create Supabase project → run `schema.sql` in SQL Editor
+2. Disable RLS on all tables (see setup.md)
+3. Confirm Supabase URL + anon key in `src/config/public-config.js`
+4. Push to GitHub → connect to Cloudflare Pages (output dir: `frontend`)
+5. Open URL — app loads immediately, no sign-in required
 
 ## Stack
 
 | Layer    | Tech                               |
-|----------|------------------------------------|
+|----------|-------------------------------------|
 | Frontend | Vanilla JS ES Modules, HTML, CSS   |
 | Database | Supabase (PostgreSQL)              |
 | Hosting  | Cloudflare Pages                   |
-| Auth     | Supabase Magic Link                |
+| Auth     | None (unlocked for testing)        |
+| AI       | Claude API (document parser)       |
 | PDF gen  | jsPDF + autotable (CDN)            |
 | Charts   | Chart.js (CDN)                     |
 | OCR      | Tesseract.js (CDN)                 |
 | Parsing  | PDF.js, SheetJS, Mammoth (CDN)     |
+| Geocoding| OpenStreetMap Nominatim (free)     |
 
-## File Tree
+## File Structure
 
 ```
-mepc-commander/
+frontend/
 ├── index.html
-├── README.md
-├── css/styles.css
-├── js/
-│   ├── app.js              ← bootstrap, auth guard, routing
-│   ├── config.js           ← Supabase keys, company, rates, markup matrix
-│   ├── db.js               ← all Supabase CRUD + MaintenanceItems, MarkupMatrix
-│   ├── router.js
-│   ├── components/ui.js
-│   ├── data/
-│   │   └── equipmaster.js  ← 174 equipment types with std hours (client-side)
-│   ├── modules/
-│   │   ├── auth.js         ← magic link sign-in, session, user badge
-│   │   ├── dashboard.js
-│   │   ├── buildings.js
+├── src/
+│   ├── app/
+│   │   ├── app.js          ← bootstrap, routing (no auth gate)
+│   │   └── router.js
+│   ├── config/
+│   │   └── public-config.js ← Supabase URL + key
+│   ├── lib/
+│   │   └── supabase-client.js
+│   ├── legacy/             ← all feature modules
+│   │   ├── buildings.js    ← address autocomplete
 │   │   ├── equipment.js
-│   │   ├── maintenance-items.js  ← library browser, seed from EQUIPMASTER
-│   │   ├── proposals.js    ← 3-step wizard, hours-based pricing
-│   │   ├── pm-records.js
-│   │   ├── quotes.js       ← pipeline, labour/material lines, markup calc
-│   │   ├── pricing.js
-│   │   ├── reporting.js
-│   │   ├── dispatch-ocr.js ← Tesseract OCR, field extraction, draft record
-│   │   ├── document-parser.js ← PDF/DOCX/XLSX parser, EQUIPMASTER vocab
-│   │   ├── scope-library.js
-│   │   └── settings.js     ← rate sheet, markup matrix editor + XLSX import
-│   └── utils/
-│       ├── helpers.js
-│       └── pdf-export.js
-└── docs/
-    ├── schema.sql
-    ├── setup.md
-    └── deployment.md
+│   │   ├── proposals.js
+│   │   ├── document-parser.js ← AI extraction, → intake form
+│   │   ├── dashboard.js
+│   │   ├── db.js
+│   │   ├── config.js
+│   │   └── ...
+│   └── styles/
+│       └── styles.css
+├── schema.sql
+├── setup.md
+└── deployment.md
 ```
 
 ## Limitations
 
-- OCR accuracy depends on screenshot quality. Blurry or compressed images will give poor results.
-- DWG/DXF not supported — drawings must be PDF.
-- Auth is single-tenant. Users must be added manually in Supabase Dashboard.
-- PDF export is functional, not print-shop quality.
-- Document parser is heuristic — always review extracted equipment before importing.
-- Supabase free tier has row limits and pauses after inactivity. Upgrade for production use.
+- No authentication — do not expose to public internet until auth is added
+- OCR accuracy depends on image quality
+- DWG/DXF not supported — drawings must be PDF or image
+- PDF export is functional, not print-shop quality
+- Document parser: always review extracted equipment before importing
+- Supabase free tier pauses after 1 week inactivity — upgrade for production

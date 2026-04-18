@@ -11,9 +11,9 @@
   --text:        #dde3ec;
   --text-dim:    #94a3b8;
   --text-muted:  #4d5d70;
-  --orange:      #f97316;
-  --orange-dim:  #c2600e;
-  --orange-glow: rgba(249,115,22,.12);
+  --orange:      #3b82f6;
+  --orange-dim:  #2563eb;
+  --orange-glow: rgba(59,130,246,.12);
   --blue:        #38bdf8;
   --blue-dim:    #0284c7;
   --green:       #22c55e;
@@ -51,7 +51,7 @@ a:hover{color:#7dd3fc}
 }
 #sidebar::after{
   content:'';position:absolute;top:0;left:0;right:0;height:2px;
-  background:linear-gradient(90deg,var(--orange) 0%,transparent 100%);
+  background:linear-gradient(90deg,var(--orange) 0%,var(--blue-dim,#0284c7) 100%);
 }
 .sidebar-logo{padding:18px 16px 14px;border-bottom:1px solid var(--border)}
 .logo-name{
@@ -225,7 +225,7 @@ input[type="checkbox"]{width:15px;height:15px;cursor:pointer;accent-color:var(--
 .status-in-progress{background:rgba(167,139,250,.18);color:var(--purple)}
 .status-resolved,.status-closed{background:rgba(34,197,94,.1);color:var(--green-dim)}
 .status-critical{background:rgba(239,68,68,.25);color:var(--red)}
-.status-high{background:rgba(249,115,22,.25);color:var(--orange)}
+.status-high{background:rgba(59,130,246,.2);color:var(--orange)}
 .status-medium{background:rgba(245,158,11,.18);color:var(--yellow)}
 .status-low{background:rgba(100,116,139,.14);color:var(--text-muted)}
 .status-inactive,.status-retired{background:rgba(100,116,139,.08);color:var(--text-muted)}
@@ -313,7 +313,7 @@ input[type="checkbox"]{width:15px;height:15px;cursor:pointer;accent-color:var(--
 }
 .auth-box::before{
   content:'';position:absolute;top:0;left:0;right:0;height:2px;
-  background:linear-gradient(90deg,var(--orange) 0%,var(--orange-dim) 100%);
+  background:linear-gradient(90deg,var(--orange) 0%,var(--blue) 100%);
   border-radius:var(--radius-lg) var(--radius-lg) 0 0;
 }
 .auth-logo{margin-bottom:28px}

@@ -8,8 +8,8 @@ export const PUBLIC_CONFIG = {
 
   AUTH: {
     redirectTo: window.location.origin,
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
   },
 };

@@ -3,16 +3,24 @@ import { getSupabaseClient } from '../lib/supabase-client.js';
 
 let _sb = null;
 
-export function initDB() {
-  _sb = getSupabaseClient();
+// Lazy getter — safe to call before initDB
+function sb() {
+  if (!_sb) {
+    try { _sb = getSupabaseClient(); } catch(e) { throw new Error('Supabase not ready: ' + e.message); }
+  }
   return _sb;
 }
 
-export function getClient() { return _sb || getSupabaseClient(); }
+export function initDB() {
+  try { _sb = getSupabaseClient(); } catch(e) { console.error('[DB] init failed:', e.message); }
+  return _sb;
+}
+
+export function getClient() { return sb(); }
 
 // ── Sequence counters (stored in app_sequences table) ─────
 export async function nextSequence(name) {
-  const { data, error } = await _sb.rpc('next_sequence', { seq_name: name });
+  const { data, error } = await sb().rpc('next_sequence', { seq_name: name });
   if (error) {
     // Fallback: use timestamp-based ID
     return Date.now().toString().slice(-6);
@@ -23,7 +31,7 @@ export async function nextSequence(name) {
 // ── Buildings ─────────────────────────────────────────────
 export const Buildings = {
   async getAll() {
-    const { data, error } = await _sb
+    const { data, error } = await sb()
       .from('buildings')
       .select('*')
       .order('name');
@@ -59,7 +67,7 @@ export const Buildings = {
     return data;
   },
   async delete(id) {
-    const { error } = await _sb.from('buildings').delete().eq('id', id);
+    const { error } = await sb().from('buildings').delete().eq('id', id);
     if (error) throw error;
   },
 };
@@ -128,7 +136,7 @@ export const Equipment = {
     return data;
   },
   async delete(id) {
-    const { error } = await _sb.from('equipment').delete().eq('id', id);
+    const { error } = await sb().from('equipment').delete().eq('id', id);
     if (error) throw error;
   },
 };
@@ -181,7 +189,7 @@ export const Proposals = {
     return data;
   },
   async delete(id) {
-    const { error } = await _sb.from('proposals').delete().eq('id', id);
+    const { error } = await sb().from('proposals').delete().eq('id', id);
     if (error) throw error;
   },
 };
@@ -234,7 +242,7 @@ export const PMRecords = {
     return data;
   },
   async delete(id) {
-    const { error } = await _sb.from('pm_records').delete().eq('id', id);
+    const { error } = await sb().from('pm_records').delete().eq('id', id);
     if (error) throw error;
   },
 };
@@ -287,7 +295,7 @@ export const Deficiencies = {
     return data;
   },
   async delete(id) {
-    const { error } = await _sb.from('deficiencies').delete().eq('id', id);
+    const { error } = await sb().from('deficiencies').delete().eq('id', id);
     if (error) throw error;
   },
 };
@@ -341,7 +349,7 @@ export const Quotes = {
     return data;
   },
   async delete(id) {
-    const { error } = await _sb.from('quotes').delete().eq('id', id);
+    const { error } = await sb().from('quotes').delete().eq('id', id);
     if (error) throw error;
   },
 };
@@ -377,7 +385,7 @@ export const PricingMatrix = {
     return data;
   },
   async delete(id) {
-    const { error } = await _sb.from('pricing_matrix').delete().eq('id', id);
+    const { error } = await sb().from('pricing_matrix').delete().eq('id', id);
     if (error) throw error;
   },
 };
@@ -386,10 +394,10 @@ export const PricingMatrix = {
 export const Stats = {
   async getSummary() {
     const [buildings, equipment, openQuotes, openDefs] = await Promise.all([
-      _sb.from('buildings').select('id', { count: 'exact', head: true }).eq('status','active'),
-      _sb.from('equipment').select('id', { count: 'exact', head: true }).eq('status','active'),
-      _sb.from('quotes').select('total').in('status', ['draft','sent','pending-approval']),
-      _sb.from('deficiencies').select('id', { count: 'exact', head: true })
+      sb().from('buildings').select('id', { count: 'exact', head: true }).eq('status','active'),
+      sb().from('equipment').select('id', { count: 'exact', head: true }).eq('status','active'),
+      sb().from('quotes').select('total').in('status', ['draft','sent','pending-approval']),
+      sb().from('deficiencies').select('id', { count: 'exact', head: true })
          .in('status', ['open','quoted','approved']),
     ]);
     const pipelineValue = (openQuotes.data || []).reduce((s, q) => s + Number(q.total || 0), 0);

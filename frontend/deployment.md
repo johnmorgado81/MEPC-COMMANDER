@@ -1,36 +1,42 @@
 # Deployment Reference
 
-Quick-reference version of the setup process for repeat deploys.
-
 ---
 
 ## Stack
 
-| Component | Service      | Cost  |
-|-----------|--------------|-------|
-| Frontend  | Cloudflare Pages | Free |
-| Database  | Supabase     | Free (upgradeable) |
-| Auth      | Supabase Auth | Free |
-| Domain    | Optional     | ~$12/yr |
+| Component | Service          | Cost               |
+|-----------|------------------|--------------------|
+| Frontend  | Cloudflare Pages | Free               |
+| Database  | Supabase         | Free (upgradeable) |
+| Auth      | None             | —                  |
+| Domain    | Optional         | ~$12/yr            |
+
+---
+
+## Current Auth Status
+
+**Authentication is disabled.** The app opens directly to the dashboard.
+No login screen, no magic link, no password.
+
+This is intentional for the testing phase.
+Authentication will be added before production/marketing launch.
 
 ---
 
 ## Deploy from Scratch
 
-1. Run `docs/schema.sql` in Supabase SQL Editor
+1. Run `schema.sql` in Supabase SQL Editor
 2. Disable RLS on all tables (see setup.md Step 1.4)
-3. Add users in Supabase → Authentication → Users
-4. Put Supabase URL + anon key in `js/config.js`
-5. Set Site URL + Redirect URL in Supabase → Auth → URL Config
-6. Commit to GitHub
-7. Connect repo to Cloudflare Pages (no build command, output dir `/`)
-8. Done
+3. Confirm Supabase URL + anon key in `src/config/public-config.js`
+4. Commit to GitHub with `frontend/` folder at repo root
+5. Connect repo to Cloudflare Pages — output dir: `frontend`, no build command
+6. Done — opens straight to dashboard
 
 ---
 
 ## Update / Redeploy
 
-Edit files locally → commit to GitHub → Cloudflare redeploys automatically (~60 seconds).
+Edit files → commit to GitHub → Cloudflare redeploys automatically (~60 seconds).
 
 No build step. No npm. No CLI required.
 
@@ -39,36 +45,21 @@ No build step. No npm. No CLI required.
 ## Custom Domain
 
 Cloudflare Pages → your project → **Custom domains** → Add domain.
-Must be a domain managed by Cloudflare DNS, or you can add a CNAME to your existing DNS.
-
----
-
-## Supabase Auth — Magic Link
-
-- Users must be added manually: Supabase → Authentication → Users → Invite
-- Default: Supabase shared SMTP (limited deliverability, fine for internal use)
-- Production: Set up custom SMTP in Supabase → Authentication → SMTP Settings
-  - Works with SendGrid, Mailgun, Postmark, Gmail SMTP, or any provider
-  - Required fields: Host, Port, Username, Password, Sender email
-
-Magic link tokens expire in **60 minutes**.
-Sessions persist in the browser (`localStorage`) until the user signs out.
 
 ---
 
 ## Environment Variables
 
-This app does NOT use environment variables — keys live in `js/config.js`.
-The anon key is safe to ship in frontend code (it's read-only by design).
+This app does not use environment variables. Supabase keys live in `src/config/public-config.js`.
+The anon key is safe in frontend code — it is read-only by design.
 Never put the Supabase **service_role** key in frontend code.
 
 ---
 
 ## Database Backups
 
-Supabase free tier: 7-day point-in-time recovery (pro tier).
-Free tier: export tables as CSV manually from Table Editor.
-Recommended: weekly CSV export of buildings, equipment, quotes, pm_records.
+Free tier: export tables as CSV from Supabase Table Editor.
+Recommended: weekly CSV export of buildings, equipment, proposals, pm_records, quotes.
 
 ---
 
@@ -76,19 +67,18 @@ Recommended: weekly CSV export of buildings, equipment, quotes, pm_records.
 
 Free tier limits:
 - 500 MB database
-- 2 GB bandwidth / month
-- 50,000 monthly active users
+- 2 GB bandwidth/month
 
-For a small mechanical contracting company, free tier will last years.
-Upgrade to Pro ($25/month) when you need backups, larger DB, or better email delivery.
+For a small mechanical contracting operation, free tier will last years.
+Upgrade to Supabase Pro ($25/month) for automated backups and better uptime.
 
 ---
 
-## Removing OCR / Tesseract
+## Adding Auth Later
 
-If Tesseract.js causes slow page loads, remove it from `index.html`:
-```html
-<!-- Remove this line: -->
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-```
-The Dispatch OCR page will show an error but all other features work normally.
+When ready to lock the app down:
+
+1. In `src/features/auth/auth.client.js` and `src/legacy/auth.js` — replace the no-op stubs with real Supabase auth calls
+2. In `src/app/app.js` — add auth gate to `boot()` before calling `start()`
+3. In Supabase → Authentication → add users
+4. Set Site URL and Redirect URLs in Supabase → Auth → URL Configuration

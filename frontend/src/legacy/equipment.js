@@ -339,7 +339,7 @@ export const Equipment = {
     if (data.tag) data.tag = data.tag.trim();
 
     if (!data.building_id) { notify.warn('Select a building.'); return; }
-    if (!data.equipment_type) { notify.warn('Equipment type is required.'); return; }
+    if (!data.equipment_type) data.equipment_type = 'Other';
 
     try {
       if (id) await DB.update(id, data);
@@ -362,6 +362,33 @@ export const Equipment = {
     } catch (err) {
       notify.error(err.message);
     }
+  },
+
+
+  openFormPrefill(prefill, buildings) {
+    buildings = buildings || [];
+    const bid = prefill.building_id || "";
+    openModal("Add Equipment — Pre-filled", `
+      <form id="eq-form">
+        <div class="form-row">
+          <div class="form-group"><label>Building *</label><select name="building_id"><option value="">— Select —</option>${buildings.map(b=>`<option value="${b.id}" ${b.id===bid?"selected":""}>${b.name}</option>`).join("")}</select></div>
+          <div class="form-group"><label>Tag</label><input name="tag" class="input" value="${prefill.tag||""}"></div>
+          <div class="form-group"><label>Service Area</label><select name="service_area">${(CONFIG.SERVICE_AREAS||[]).map(a=>`<option value="${a.value}">${a.label}</option>`).join("")}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Equipment Type</label><input name="equipment_type" class="input" list="pf-dl" value="${prefill.equipment_type||""}" autocomplete="off"><datalist id="pf-dl">${(EQUIPMASTER||[]).map(e=>`<option value="${e.equipment_type}">`).join("")}</datalist></div>
+          <div class="form-group"><label>Manufacturer</label><input name="manufacturer" class="input" value="${prefill.make||""}"></div>
+          <div class="form-group"><label>Model</label><input name="model" class="input" value="${prefill.model||""}"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Serial Number</label><input name="serial_number" class="input" value="${prefill.serial_number||""}"></div>
+          <div class="form-group"><label>Quantity</label><input name="qty" type="number" min="1" class="input" value="${parseInt(prefill.quantity)||1}"></div>
+          <div class="form-group"><label>Location</label><input name="location" class="input" value="${prefill.location||""}"></div>
+        </div>
+        <div class="form-group"><label>Notes / Specs</label><textarea name="notes" rows="2" class="input">${[prefill.capacity,prefill.filter_size,prefill.voltage,prefill.refrigerant,prefill.notes].filter(Boolean).join(" | ")}</textarea></div>
+      </form>`,
+      [{label:"Cancel",class:"btn-secondary",onClick:closeModal},{label:"Add Equipment",class:"btn-primary",onClick:()=>this.saveEquipment(null)}]
+    );
   },
 
   async exportData() {

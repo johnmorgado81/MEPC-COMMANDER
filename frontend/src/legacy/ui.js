@@ -61,7 +61,9 @@ export function openModal(titleOrOpts, bodyHtml, buttonsArr) {
     return;
   }
 
-  box.className = 'modal-box';
+  // Apply size class if passed via object form
+  const sizeClass = (typeof titleOrOpts === 'object' && titleOrOpts.size) ? ' modal-' + titleOrOpts.size : '';
+  box.className = 'modal-box' + sizeClass;
   head.innerHTML = `<span>${title}</span><button class="modal-close" id="modal-close-btn">&times;</button>`;
   bodyEl.innerHTML = body;
   footEl.innerHTML = footer;

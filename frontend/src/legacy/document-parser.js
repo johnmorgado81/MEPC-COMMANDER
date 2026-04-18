@@ -1,17 +1,49 @@
-// document-parser.js — AI-assisted mechanical equipment extraction
-import { notify, spinner, openModal, closeModal } from './ui.js';
-import { Buildings, Equipment } from './db.js';
+import { notify, openModal, closeModal, spinner } from './ui.js';
+import { Buildings, Equipment as EquipDB } from './db.js';
 import { CONFIG } from './config.js';
 import { EQUIPMASTER } from './equipmaster.js';
+import { Equipment } from './equipment.js';
 
 const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
 
-const EQUIP_TYPES_LIST = (() => {
-  const types = new Set();
-  (EQUIPMASTER || []).forEach(e => { if (e.equipment_type) types.add(e.equipment_type); });
-  CONFIG.EQUIPMENT_TYPES.forEach(t => types.add(t));
-  return [...types].sort();
+const EQUIP_TYPES = (() => {
+  const s = new Set();
+  (EQUIPMASTER||[]).forEach(e => e.equipment_type && s.add(e.equipment_type));
+  CONFIG.EQUIPMENT_TYPES.forEach(t => s.add(t));
+  return [...s].sort();
 })();
+
+// VRF / VRV aliases — normalize both directions
+const TYPE_ALIASES = {
+  'VRF System': ['VRF','VRV','Variable Refrigerant Flow','Variable Refrigerant Volume'],
+  'VRV System': ['VRV','VRF','Variable Refrigerant Flow','Variable Refrigerant Volume'],
+  'Air Handling Unit': ['AHU','Air Handler','DOAS'],
+  'Rooftop Unit': ['RTU','Packaged Rooftop'],
+  'Fan Coil Unit': ['FCU','Fan Coil'],
+  'Make-Up Air Unit': ['MAU','Makeup Air'],
+  'Heat Recovery Ventilator': ['HRV','Heat Recovery'],
+  'Energy Recovery Ventilator': ['ERV','Energy Recovery'],
+  'Hot Water Boiler': ['HWB','Heating Boiler','HW Boiler'],
+  'Condensing Boiler': ['Condensing Boiler','Mod-Con'],
+  'Chiller': ['CH','Chiller'],
+  'Cooling Tower': ['CT','Cooling Tower'],
+  'Circulation Pump': ['HWP','CWP','CHWP','Circulator','Pump'],
+  'Domestic Water Heater': ['DHW','HWT','Water Heater','HW Tank'],
+  'Exhaust Fan': ['EF','Exhaust Fan','EX Fan'],
+  'Variable Frequency Drive': ['VFD','Variable Speed Drive','VSD'],
+  'Plate Heat Exchanger': ['PHE','HX','Heat Exchanger','B&G'],
+};
+
+function normalizeType(raw) {
+  if (!raw) return raw;
+  const u = raw.trim().toUpperCase();
+  for (const [canonical, aliases] of Object.entries(TYPE_ALIASES)) {
+    if (aliases.some(a => u === a.toUpperCase() || u.includes(a.toUpperCase()))) return canonical;
+  }
+  const direct = EQUIP_TYPES.find(t => t.toLowerCase() === raw.toLowerCase().trim());
+  if (direct) return direct;
+  return raw.trim();
+}
 
 export async function renderDocumentParser(container) {
   let buildings = [];
@@ -22,32 +54,35 @@ export async function renderDocumentParser(container) {
       <div class="toolbar">
         <div>
           <div style="font-family:var(--font-cond);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">Document Parser</div>
-          <div style="font-size:12px;color:var(--text-dim);margin-top:2px">Extract equipment from PDFs, drawings, spreadsheets, and service reports. AI-assisted MEPC vocabulary matching.</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:2px">Extract equipment from mechanical schedules, drawings, service reports, and spreadsheets. AI reads tags, makes, models, sizes, and quantities.</div>
         </div>
         <div class="toolbar-right"><span class="ai-badge">✦ Claude AI</span></div>
       </div>
 
-      <div class="card" id="upload-card">
+      <div class="card">
         <div class="card-header"><h3>Upload Document</h3></div>
         <div class="card-body">
           <div class="drop-zone" id="drop-zone">
             <span class="drop-zone-icon">📂</span>
             <div class="drop-zone-text">Drop file here or click to browse</div>
-            <div class="drop-zone-sub">PDF · DOCX · XLSX · CSV · PNG/JPG (OCR)</div>
+            <div class="drop-zone-sub">PDF · DOCX · XLSX · CSV · PNG/JPG/JPEG (drawing scan or photo)</div>
             <input type="file" id="file-input" accept=".pdf,.docx,.xlsx,.xls,.csv,.png,.jpg,.jpeg" style="display:none">
+          </div>
+          <div style="margin-top:12px;font-size:11.5px;color:var(--text-muted)">
+            Works with: equipment schedules, mechanical drawings (PNG/JPG scans), PM reports, submittal sheets, cut sheets, tender specs
           </div>
         </div>
       </div>
 
-      <div id="parse-progress-card" style="display:none">
+      <div id="progress-card" style="display:none">
         <div class="card" style="margin-top:14px">
           <div class="card-header">
-            <h3 id="progress-title">Processing</h3>
-            <span id="progress-badge" class="ai-badge" style="display:none">✦ AI Analysis</span>
+            <h3 id="prog-title">Processing</h3>
+            <span id="prog-ai-badge" class="ai-badge" style="display:none">✦ AI Analysis</span>
           </div>
           <div class="card-body">
-            <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
-            <div id="progress-msg" style="font-size:12px;color:var(--text-dim);margin-top:8px"></div>
+            <div class="progress-bar"><div class="progress-fill" id="prog-fill" style="width:0%"></div></div>
+            <div id="prog-msg" style="font-size:12px;color:var(--text-dim);margin-top:8px"></div>
           </div>
         </div>
       </div>
@@ -56,107 +91,106 @@ export async function renderDocumentParser(container) {
         <div class="card" style="margin-top:14px">
           <div class="card-header">
             <h3>Extracted Equipment <span id="extract-count" style="color:var(--orange);margin-left:6px"></span></h3>
-            <div style="display:flex;gap:8px;align-items:center">
-              <button class="btn btn-sm btn-secondary" id="ai-reanalyze-btn">✦ Re-analyze with AI</button>
-              <button class="btn btn-sm btn-secondary" id="export-csv-btn">Export CSV</button>
-              <button class="btn btn-sm btn-primary" id="import-btn">Import to Building</button>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-sm btn-secondary" id="btn-reanalyze">✦ Re-analyze</button>
+              <button class="btn btn-sm btn-secondary" id="btn-csv">Export CSV</button>
+              <button class="btn btn-sm btn-primary"   id="btn-import">Import to Building</button>
             </div>
           </div>
-          <div class="card-body no-pad"><div id="results-table-wrap"></div></div>
+          <div class="card-body no-pad"><div id="results-wrap"></div></div>
         </div>
 
         <div class="card" style="margin-top:14px">
           <div class="card-header">
-            <h3>Raw Extracted Text</h3>
+            <h3>Extracted Text</h3>
             <div style="display:flex;gap:8px">
-              <button class="btn btn-sm btn-primary" id="manual-ai-btn">✦ Run AI on This Text</button>
-              <button class="btn btn-sm btn-secondary" id="edit-raw-btn">Edit</button>
+              <button class="btn btn-sm btn-primary"   id="btn-manual-ai">✦ Re-run AI on Text</button>
+              <button class="btn btn-sm btn-secondary" id="btn-edit-raw">Edit</button>
             </div>
           </div>
           <div class="card-body">
-            <textarea id="raw-text-area" class="input" rows="8" style="font-family:var(--font-mono);font-size:11.5px;color:var(--text-dim)" readonly></textarea>
+            <textarea id="raw-text" class="input" rows="8" readonly
+              style="font-family:var(--font-mono);font-size:11.5px;color:var(--text-dim)"></textarea>
           </div>
         </div>
       </div>
     </div>`;
 
   const state = { rawText: '', items: [], fileName: '' };
-  setupDropZone(state, buildings);
+  setupDrop(state, buildings);
 }
 
-function setupDropZone(state, buildings) {
+function setupDrop(state, buildings) {
   const zone = document.getElementById('drop-zone');
   const inp  = document.getElementById('file-input');
   zone.onclick = () => inp.click();
   inp.onchange = e => e.target.files[0] && processFile(e.target.files[0], state, buildings);
   zone.ondragover  = e => { e.preventDefault(); zone.classList.add('drag-over'); };
   zone.ondragleave = () => zone.classList.remove('drag-over');
-  zone.ondrop = e => {
-    e.preventDefault(); zone.classList.remove('drag-over');
-    const f = e.dataTransfer.files[0];
-    if (f) processFile(f, state, buildings);
-  };
+  zone.ondrop = e => { e.preventDefault(); zone.classList.remove('drag-over'); e.dataTransfer.files[0] && processFile(e.dataTransfer.files[0], state, buildings); };
 }
 
 async function processFile(file, state, buildings) {
   state.fileName = file.name;
   const ext = file.name.split('.').pop().toLowerCase();
-  showProgress('Parsing Document');
-  setProgress(10, `Reading ${file.name}…`);
+  showProg('Parsing Document'); setProg(10, `Reading ${file.name}…`);
 
   try {
     let text = '';
-    if (ext === 'pdf')                 text = await extractPDF(file);
-    else if (ext === 'docx')           text = await extractDOCX(file);
-    else if (['xlsx','xls'].includes(ext)) text = await extractXLSX(file);
-    else if (ext === 'csv')            text = await extractCSV(file);
-    else if (['png','jpg','jpeg'].includes(ext)) text = await extractOCR(file);
+    if      (ext === 'pdf')                      text = await readPDF(file);
+    else if (ext === 'docx')                     text = await readDOCX(file);
+    else if (['xlsx','xls'].includes(ext))       text = await readXLSX(file);
+    else if (ext === 'csv')                      text = await readCSV(file);
+    else if (['png','jpg','jpeg'].includes(ext)) text = await readOCR(file);
     else throw new Error(`Unsupported file type: .${ext}`);
 
     state.rawText = text;
-    setProgress(60, 'Running AI equipment extraction…');
-    document.getElementById('progress-badge').style.display = '';
+    setProg(60, 'Sending to Claude AI for analysis…');
+    document.getElementById('prog-ai-badge').style.display = '';
 
-    const items = await aiExtract(text);
-    state.items = items;
-    setProgress(100, `Found ${items.length} equipment item(s)`);
+    state.items = await aiExtract(text);
+    setProg(100, `Found ${state.items.length} equipment item(s)`);
     setTimeout(() => showResults(state, buildings), 400);
   } catch (err) {
-    document.getElementById('parse-progress-card').style.display = 'none';
+    document.getElementById('progress-card').style.display = 'none';
     notify.error(err.message || 'Parse failed');
   }
 }
 
-async function extractPDF(file) {
+async function readPDF(file) {
   if (!window.pdfjsLib) throw new Error('PDF.js not loaded');
   window.pdfjsLib.GlobalWorkerOptions.workerSrc =
     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  const ab  = await file.arrayBuffer();
-  const pdf = await window.pdfjsLib.getDocument({ data: ab }).promise;
+  const pdf   = await window.pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
   const pages = Math.min(pdf.numPages, 80);
   let text = '';
   for (let i = 1; i <= pages; i++) {
-    setProgress(10 + Math.floor((i / pages) * 40), `Reading page ${i} of ${pages}…`);
-    const page    = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    text += `\n--- PAGE ${i} ---\n` + content.items.map(it => it.str).join(' ');
+    setProg(10 + Math.floor(i / pages * 40), `Reading page ${i} of ${pages}…`);
+    const pg   = await pdf.getPage(i);
+    const cont = await pg.getTextContent();
+    // Preserve spatial layout — group items by vertical position
+    const byY = {};
+    cont.items.forEach(it => {
+      const y = Math.round(it.transform[5] / 5) * 5;
+      byY[y] = byY[y] ? byY[y] + ' ' + it.str : it.str;
+    });
+    const pageText = Object.keys(byY).sort((a,b) => b - a).map(y => byY[y]).join('\n');
+    text += `\n=== PAGE ${i} ===\n${pageText}`;
   }
-  if (text.trim().length < 80) throw new Error('PDF has no extractable text. Use a PNG/JPG for OCR on scanned documents.');
+  if (text.trim().length < 80) throw new Error('PDF has no extractable text. For scanned drawings use PNG/JPG for OCR.');
   return text;
 }
 
-async function extractDOCX(file) {
+async function readDOCX(file) {
   if (!window.mammoth) throw new Error('Mammoth.js not loaded');
-  const ab = await file.arrayBuffer();
-  const r  = await mammoth.extractRawText({ arrayBuffer: ab });
-  if (!r.value || r.value.trim().length < 10) throw new Error('No text found in DOCX');
+  const r = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+  if (!r.value?.trim()) throw new Error('No text found in DOCX');
   return r.value;
 }
 
-async function extractXLSX(file) {
+async function readXLSX(file) {
   if (!window.XLSX) throw new Error('SheetJS not loaded');
-  const ab = await file.arrayBuffer();
-  const wb = XLSX.read(ab, { type: 'array' });
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
   let text = '';
   wb.SheetNames.forEach(name => {
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' });
@@ -165,7 +199,7 @@ async function extractXLSX(file) {
   return text;
 }
 
-function extractCSV(file) {
+function readCSV(file) {
   return new Promise((res, rej) => {
     const r = new FileReader();
     r.onload = e => res(e.target.result);
@@ -174,22 +208,59 @@ function extractCSV(file) {
   });
 }
 
-async function extractOCR(file) {
+async function readOCR(file) {
   if (!window.Tesseract) throw new Error('Tesseract.js not loaded');
-  setProgress(20, 'Running OCR — may take 30–60 seconds…');
+  setProg(20, 'Running OCR on image — 30–60 seconds…');
   const result = await Tesseract.recognize(file, 'eng', {
     logger: m => {
       if (m.status === 'recognizing text')
-        setProgress(20 + Math.floor(m.progress * 35), `OCR: ${Math.floor(m.progress * 100)}%…`);
+        setProg(20 + Math.floor(m.progress * 35), `OCR: ${Math.floor(m.progress * 100)}%…`);
     }
   });
-  if (!result.data.text?.trim()) throw new Error('OCR found no readable text');
+  if (!result.data.text?.trim()) throw new Error('OCR found no readable text in image');
   return result.data.text;
 }
 
 async function aiExtract(rawText) {
-  const truncated = rawText.slice(0, 14000);
-  const typeList  = EQUIP_TYPES_LIST.slice(0, 80).join(', ');
+  const truncated = rawText.slice(0, 16000);
+
+  const systemPrompt = `You are a licensed mechanical engineer and estimator in British Columbia, Canada.
+Your job is to read mechanical drawings, equipment schedules, PM service reports, tender specifications, and submittal sheets, then extract every piece of mechanical equipment listed.
+
+Rules:
+- Read tables, schedules, legends, and free text — extract ALL equipment items
+- VRF and VRV are the same equipment type — normalize to "VRF System" 
+- Expand abbreviations: AHU=Air Handling Unit, RTU=Rooftop Unit, FCU=Fan Coil Unit, MAU=Make-Up Air Unit, HRV=Heat Recovery Ventilator, ERV=Energy Recovery Ventilator, HWB=Hot Water Boiler, CH=Chiller, CT=Cooling Tower, HWP/CWP/CHWP=Circulation Pump, EF=Exhaust Fan, VFD=Variable Frequency Drive, PHE=Plate Heat Exchanger, DHW=Domestic Water Heater, PRV=Pressure Reducing Valve, BFP=Backflow Preventer
+- Extract capacity/size information: CFM, MBH, tons, GPM, HP, kW, PSI, litres, pipe size, duct size
+- Extract filter sizes when mentioned (e.g. 24x24x2, MERV 13)
+- Extract refrigerant type when mentioned (R-410A, R-32, etc.)
+- If a row in a schedule represents multiple identical units, set quantity accordingly
+- Do NOT invent information not present in the document
+- If a field is not found, use null`;
+
+  const userPrompt = `Extract all mechanical equipment from this document.
+
+Return ONLY a valid JSON array with no explanation, no markdown, no backticks.
+
+Each object must have:
+{
+  "tag": "equipment tag or ID (e.g. AHU-1, B-2) or null",
+  "equipment_type": "full type name (e.g. Air Handling Unit, Hot Water Boiler)",
+  "make": "manufacturer name or null",
+  "model": "model number or null",
+  "serial_number": "serial number or null",
+  "quantity": 1,
+  "capacity": "size/capacity with units (e.g. 5000 CFM, 500 MBH, 20 tons) or null",
+  "filter_size": "filter dimensions e.g. 24x24x2 MERV-13 or null",
+  "location": "floor, room, or area or null",
+  "voltage": "electrical supply e.g. 208V/3Ph or null",
+  "refrigerant": "refrigerant type or null",
+  "notes": "any other relevant spec info or null"
+}
+
+Document:
+${truncated}`;
+
   let response;
   try {
     response = await fetch(CLAUDE_API, {
@@ -198,195 +269,187 @@ async function aiExtract(rawText) {
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 1000,
-        messages: [{
-          role: 'user',
-          content: `You are a mechanical systems expert. Extract all mechanical equipment items from the document text.
-
-Return ONLY a valid JSON array. No explanation, no markdown, no backticks. Just raw JSON.
-
-Each object: { tag, equipment_type, location, make, model, quantity, notes }
-Match equipment_type to: ${typeList}
-Use "—" for any field not found. Default quantity to 1.
-
-If nothing found, return: []
-
-Document:
-${truncated}`
-        }]
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
       })
     });
-  } catch { return fallbackExtract(rawText); }
+  } catch { return fallback(rawText); }
 
-  if (!response.ok) return fallbackExtract(rawText);
+  if (!response.ok) return fallback(rawText);
 
   let data;
-  try { data = await response.json(); } catch { return fallbackExtract(rawText); }
+  try { data = await response.json(); } catch { return fallback(rawText); }
 
-  const content = (data.content || []).find(b => b.type === 'text')?.text || '[]';
+  const content = (data.content||[]).find(b => b.type==='text')?.text || '[]';
   try {
-    const parsed = JSON.parse(content.replace(/```json|```/g, '').trim());
-    if (Array.isArray(parsed) && parsed.length) return parsed;
+    const clean  = content.replace(/```json|```/g,'').trim();
+    const parsed = JSON.parse(clean);
+    if (Array.isArray(parsed)) {
+      return parsed.map(item => ({
+        ...item,
+        equipment_type: normalizeType(item.equipment_type || ''),
+        quantity: parseInt(item.quantity) || 1,
+      }));
+    }
   } catch {}
 
-  return fallbackExtract(rawText);
+  return fallback(rawText);
 }
 
-function fallbackExtract(text) {
-  const items = [];
-  const seenTags = new Set();
+function fallback(text) {
+  const items = []; const seen = new Set();
   const tagRe = /\b([A-Z]{1,4}-?\d{1,4}[A-Z]?)\b/g;
-
-  text.split('\n').map(l => l.trim()).filter(l => l.length > 3).forEach(line => {
+  text.split('\n').map(l => l.trim()).filter(l => l.length > 4).forEach(line => {
     const ll = line.toLowerCase();
-    const matched = EQUIP_TYPES_LIST.find(t =>
+    const matched = EQUIP_TYPES.find(t =>
       t.toLowerCase().split(/[\s/]+/).filter(w => w.length > 2).every(w => ll.includes(w))
     );
     if (!matched) return;
-    const tags = [...line.matchAll(tagRe)].map(m => m[1]);
-    const tag  = tags[0] || '—';
-    const key  = `${matched}-${tag}`;
-    if (seenTags.has(key)) return;
-    seenTags.add(key);
-    items.push({ tag, equipment_type: matched, location: '—', make: '—', model: '—', quantity: 1, notes: line.slice(0, 120) });
+    const tag = ([...line.matchAll(tagRe)].map(m => m[1])[0]) || null;
+    const key = `${matched}-${tag||line.slice(0,30)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    items.push({ tag, equipment_type: normalizeType(matched), make: null, model: null, serial_number: null, quantity: 1, capacity: null, filter_size: null, location: null, voltage: null, refrigerant: null, notes: line.slice(0,120) });
   });
-
   return items.slice(0, 100);
 }
 
-function showProgress(title) {
-  document.getElementById('parse-progress-card').style.display = '';
+function showProg(title) {
+  document.getElementById('progress-card').style.display = '';
   document.getElementById('results-section').style.display = 'none';
-  document.getElementById('progress-title').textContent = title;
-  document.getElementById('progress-badge').style.display = 'none';
-  setProgress(5, 'Starting…');
+  document.getElementById('prog-title').textContent = title;
+  document.getElementById('prog-ai-badge').style.display = 'none';
+  setProg(5, 'Starting…');
 }
-function setProgress(pct, msg) {
-  const f = document.getElementById('progress-fill');
-  const m = document.getElementById('progress-msg');
+function setProg(pct, msg) {
+  const f = document.getElementById('prog-fill');
+  const m = document.getElementById('prog-msg');
   if (f) f.style.width = pct + '%';
   if (m) m.textContent = msg;
 }
 
 function showResults(state, buildings) {
-  document.getElementById('parse-progress-card').style.display = 'none';
+  document.getElementById('progress-card').style.display = 'none';
   document.getElementById('results-section').style.display = '';
-  const ra = document.getElementById('raw-text-area');
+  const ra = document.getElementById('raw-text');
   if (ra) ra.value = state.rawText;
-  renderTable(state);
+  renderTable(state, buildings);
   document.getElementById('extract-count').textContent = `(${state.items.length})`;
 
-  document.getElementById('ai-reanalyze-btn').onclick = async () => {
-    showProgress('Re-analyzing');
-    document.getElementById('progress-badge').style.display = '';
-    setProgress(30, 'Sending to Claude AI…');
+  document.getElementById('btn-reanalyze').onclick = async () => {
+    showProg('Re-analyzing'); document.getElementById('prog-ai-badge').style.display = '';
+    setProg(30, 'Sending to Claude AI…');
     state.items = await aiExtract(state.rawText);
-    setProgress(100, `Found ${state.items.length} items`);
-    setTimeout(() => {
-      document.getElementById('parse-progress-card').style.display = 'none';
-      document.getElementById('results-section').style.display = '';
-      document.getElementById('extract-count').textContent = `(${state.items.length})`;
-      renderTable(state);
-    }, 300);
+    setProg(100, `Found ${state.items.length} items`);
+    setTimeout(() => { document.getElementById('progress-card').style.display='none'; document.getElementById('results-section').style.display=''; document.getElementById('extract-count').textContent=`(${state.items.length})`; renderTable(state, buildings); }, 300);
   };
 
-  document.getElementById('manual-ai-btn').onclick = async () => {
-    const text = document.getElementById('raw-text-area').value;
+  document.getElementById('btn-manual-ai').onclick = async () => {
+    const text = document.getElementById('raw-text').value;
     if (!text.trim()) return;
     state.rawText = text;
-    showProgress('AI Extraction');
-    document.getElementById('progress-badge').style.display = '';
-    setProgress(30, 'Sending to Claude AI…');
+    showProg('AI Extraction'); document.getElementById('prog-ai-badge').style.display = '';
+    setProg(30, 'Sending to Claude AI…');
     state.items = await aiExtract(text);
-    setProgress(100, `Found ${state.items.length} items`);
-    setTimeout(() => {
-      document.getElementById('parse-progress-card').style.display = 'none';
-      document.getElementById('results-section').style.display = '';
-      document.getElementById('extract-count').textContent = `(${state.items.length})`;
-      renderTable(state);
-    }, 300);
+    setProg(100, `Found ${state.items.length} items`);
+    setTimeout(() => { document.getElementById('progress-card').style.display='none'; document.getElementById('results-section').style.display=''; document.getElementById('extract-count').textContent=`(${state.items.length})`; renderTable(state, buildings); }, 300);
   };
 
-  document.getElementById('edit-raw-btn').onclick = () => {
-    const ta = document.getElementById('raw-text-area');
-    ta.readOnly = !ta.readOnly;
-    document.getElementById('edit-raw-btn').textContent = ta.readOnly ? 'Edit' : 'Lock';
-  };
+  const editBtn = document.getElementById('btn-edit-raw');
+  editBtn.onclick = () => { const ta = document.getElementById('raw-text'); ta.readOnly = !ta.readOnly; editBtn.textContent = ta.readOnly ? 'Edit' : 'Lock'; };
 
-  document.getElementById('export-csv-btn').onclick = () => exportCSV(state);
-  document.getElementById('import-btn').onclick = () => showImportModal(state, buildings);
+  document.getElementById('btn-csv').onclick    = () => doExportCSV(state);
+  document.getElementById('btn-import').onclick = () => showImportModal(state, buildings);
 }
 
-function renderTable(state) {
-  const wrap = document.getElementById('results-table-wrap');
+function renderTable(state, buildings) {
+  const wrap = document.getElementById('results-wrap');
   if (!wrap) return;
-
   if (!state.items.length) {
-    wrap.innerHTML = `<div class="empty-state" style="padding:32px">
-      <p>No equipment found.</p>
-      <p style="font-size:11.5px;margin-top:4px">Edit raw text above and re-run AI extraction.</p>
-    </div>`;
+    wrap.innerHTML = `<div class="empty-state" style="padding:32px"><p>No equipment found.</p><p style="font-size:11.5px;margin-top:4px">Try editing the raw text and clicking Re-run AI.</p></div>`;
     return;
   }
 
   wrap.innerHTML = `
-    <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
-      <input type="search" id="result-search" class="input input-sm" placeholder="Filter…" style="max-width:200px">
+    <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <input type="search" id="tbl-search" class="input input-sm" placeholder="Filter…" style="max-width:180px">
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;text-transform:none;letter-spacing:0;color:var(--text-dim);cursor:pointer">
-        <input type="checkbox" id="select-all-chk" checked> Select All
+        <input type="checkbox" id="chk-all" checked> Select All
       </label>
       <span id="sel-count" style="font-size:11.5px;color:var(--text-muted)"></span>
     </div>
     <div class="table-wrap">
-    <table class="table" id="results-table">
+    <table class="table" id="extract-tbl">
       <thead><tr>
-        <th style="width:36px"></th><th>Tag</th><th>Equipment Type</th><th>Location</th><th>Make</th><th>Model</th><th>Qty</th><th></th>
+        <th style="width:32px"></th>
+        <th>Tag</th><th>Equipment Type</th><th>Make</th><th>Model</th>
+        <th>Qty</th><th>Capacity/Size</th><th>Filter Size</th><th>Location</th><th>Notes</th>
+        <th></th>
       </tr></thead>
       <tbody>
         ${state.items.map((item, i) => `<tr data-idx="${i}">
           <td><input type="checkbox" class="row-chk" data-idx="${i}" checked></td>
-          <td><input class="input input-sm mono" data-field="tag" data-idx="${i}" value="${esc(item.tag)}" style="width:68px"></td>
+          <td><input class="input input-sm mono" data-f="tag" data-i="${i}" value="${x(item.tag)}" style="width:66px"></td>
           <td>
-            <select class="input input-sm" data-field="equipment_type" data-idx="${i}" style="min-width:170px">
-              ${EQUIP_TYPES_LIST.map(t => `<option value="${esc(t)}"${t===item.equipment_type?' selected':''}>${esc(t)}</option>`).join('')}
+            <select class="input input-sm" data-f="equipment_type" data-i="${i}" style="min-width:160px">
+              ${EQUIP_TYPES.map(t=>`<option value="${x(t)}"${t===item.equipment_type?' selected':''}>${x(t)}</option>`).join('')}
+              ${!EQUIP_TYPES.includes(item.equipment_type)?`<option value="${x(item.equipment_type)}" selected>${x(item.equipment_type)}</option>`:''}
             </select>
           </td>
-          <td><input class="input input-sm" data-field="location" data-idx="${i}" value="${esc(item.location)}" style="width:110px"></td>
-          <td><input class="input input-sm" data-field="make" data-idx="${i}" value="${esc(item.make)}" style="width:90px"></td>
-          <td><input class="input input-sm" data-field="model" data-idx="${i}" value="${esc(item.model)}" style="width:90px"></td>
-          <td><input class="input input-sm" data-field="quantity" data-idx="${i}" type="number" min="1" value="${item.quantity||1}" style="width:50px"></td>
-          <td><button class="btn btn-xs btn-danger" data-remove="${i}">✕</button></td>
+          <td><input class="input input-sm" data-f="make"      data-i="${i}" value="${x(item.make)}"       style="width:90px"></td>
+          <td><input class="input input-sm" data-f="model"     data-i="${i}" value="${x(item.model)}"      style="width:90px"></td>
+          <td><input class="input input-sm" data-f="quantity"  data-i="${i}" type="number" min="1" value="${item.quantity||1}" style="width:48px"></td>
+          <td><input class="input input-sm" data-f="capacity"  data-i="${i}" value="${x(item.capacity)}"   style="width:100px"></td>
+          <td><input class="input input-sm" data-f="filter_size" data-i="${i}" value="${x(item.filter_size)}" style="width:100px"></td>
+          <td><input class="input input-sm" data-f="location"  data-i="${i}" value="${x(item.location)}"   style="width:100px"></td>
+          <td style="max-width:160px;font-size:11.5px;color:var(--text-dim);white-space:normal">${x((item.notes||'').slice(0,80))}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-xs btn-secondary" data-form="${i}" title="Open intake form pre-filled">→ Form</button>
+            <button class="btn btn-xs btn-danger" data-rm="${i}">✕</button>
+          </td>
         </tr>`).join('')}
       </tbody>
     </table></div>`;
 
   const tbody = wrap.querySelector('tbody');
 
+  // Inline edit
   tbody.addEventListener('change', e => {
-    if (!e.target.dataset.field) return;
-    const idx = parseInt(e.target.dataset.idx);
-    state.items[idx][e.target.dataset.field] = e.target.value;
+    if (!e.target.dataset.f) return;
+    state.items[parseInt(e.target.dataset.i)][e.target.dataset.f] = e.target.value;
     updateSel();
   });
 
-  tbody.querySelectorAll('[data-remove]').forEach(btn => {
-    btn.onclick = () => {
-      state.items.splice(parseInt(btn.dataset.remove), 1);
-      document.getElementById('extract-count').textContent = `(${state.items.length})`;
-      renderTable(state);
+  // → Form (send single item to intake form)
+  tbody.querySelectorAll('[data-form]').forEach(btn => {
+    btn.onclick = async () => {
+      const item = state.items[parseInt(btn.dataset.form)];
+      let bldgs = [];
+      try { bldgs = await Buildings.getAll(); } catch {}
+      Equipment.openFormPrefill(item, bldgs);
     };
   });
 
-  const allChk = document.getElementById('select-all-chk');
+  // Remove row
+  tbody.querySelectorAll('[data-rm]').forEach(btn => {
+    btn.onclick = () => {
+      state.items.splice(parseInt(btn.dataset.rm), 1);
+      document.getElementById('extract-count').textContent = `(${state.items.length})`;
+      renderTable(state, buildings);
+    };
+  });
+
+  // Select all
+  const allChk = document.getElementById('chk-all');
   allChk.onchange = () => { wrap.querySelectorAll('.row-chk').forEach(c => c.checked = allChk.checked); updateSel(); };
   wrap.querySelectorAll('.row-chk').forEach(c => c.onchange = updateSel);
 
-  document.getElementById('result-search').oninput = e => {
+  document.getElementById('tbl-search').oninput = e => {
     const q = e.target.value.toLowerCase();
     tbody.querySelectorAll('tr').forEach(tr => { tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none'; });
   };
 
   updateSel();
-
   function updateSel() {
     const n = wrap.querySelectorAll('.row-chk:checked').length;
     const el = document.getElementById('sel-count');
@@ -396,76 +459,70 @@ function renderTable(state) {
 
 function showImportModal(state, buildings) {
   const checked = [...document.querySelectorAll('.row-chk:checked')].map(c => parseInt(c.dataset.idx));
-  if (!checked.length) { notify.warn('Select at least one item to import.'); return; }
-
+  if (!checked.length) { notify.warn('Select at least one item.'); return; }
   openModal('Import to Building', `
     <div class="form-group">
-      <label>Target Building *</label>
-      <select id="import-bld" class="input">
+      <label>Building *</label>
+      <select id="imp-bld" class="input">
         <option value="">— Select —</option>
-        ${buildings.map(b => `<option value="${b.id}">${esc(b.name)}${b.client_name ? ' — ' + esc(b.client_name) : ''}</option>`).join('')}
+        ${buildings.map(b=>`<option value="${b.id}">${x(b.name)}${b.client_name?' — '+x(b.client_name):''}</option>`).join('')}
       </select>
     </div>
     <div class="form-group">
       <label>Service Area</label>
-      <select id="import-area" class="input">
-        ${CONFIG.SERVICE_AREAS.map(a => `<option value="${a.value}">${a.label}</option>`).join('')}
+      <select id="imp-area" class="input">
+        ${CONFIG.SERVICE_AREAS.map(a=>`<option value="${a.value}">${a.label}</option>`).join('')}
       </select>
     </div>
-    <div class="alert alert-info" style="margin-top:10px">${checked.length} item(s) will be imported.</div>`,
+    <div class="alert alert-info" style="margin-top:10px">${checked.length} item(s) will be imported as equipment records.</div>`,
     [
       { label: 'Cancel', class: 'btn-secondary', onClick: closeModal },
-      { label: `Import ${checked.length} Items`, class: 'btn-primary', onClick: () => runImport(state, checked) },
+      { label: `Import ${checked.length}`, class: 'btn-primary', onClick: () => runImport(state, checked) },
     ]
   );
 }
 
 async function runImport(state, indices) {
-  const bid  = document.getElementById('import-bld')?.value;
-  const area = document.getElementById('import-area')?.value;
+  const bid  = document.getElementById('imp-bld')?.value;
+  const area = document.getElementById('imp-area')?.value;
   if (!bid) { notify.warn('Select a building.'); return; }
   closeModal();
-
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0,10);
   let ok = 0, fail = 0;
-
-  for (const idx of indices) {
-    const item = state.items[idx];
+  for (const i of indices) {
+    const it = state.items[i];
     try {
-      await Equipment.create({
-        building_id:    bid,
-        tag:            item.tag === '—' ? null : item.tag,
-        equipment_type: item.equipment_type,
-        location:       item.location === '—' ? null : item.location,
-        make:           item.make === '—' ? null : item.make,
-        model:          item.model === '—' ? null : item.model,
-        service_area:   area || 'common_strata',
-        status:         'active',
-        quantity:       parseInt(item.quantity) || 1,
-        notes:          item.notes || null,
+      await EquipDB.create({
+        building_id: bid,
+        tag: it.tag || null,
+        equipment_type: it.equipment_type || 'Other',
+        make: it.make || null,
+        model: it.model || null,
+        serial_number: it.serial_number || null,
+        service_area: area || 'common_strata',
+        status: 'active',
+        qty: parseInt(it.quantity) || 1,
+        location: it.location || null,
+        notes: [it.capacity, it.filter_size, it.voltage, it.refrigerant, it.notes].filter(Boolean).join(' | ') || null,
         next_service_date: today,
-        created_at:     new Date().toISOString(),
-        updated_at:     new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       });
       ok++;
     } catch { fail++; }
   }
-
   if (ok)   notify.success(`${ok} equipment record(s) created.`);
-  if (fail) notify.warn(`${fail} item(s) failed — check for duplicate tags.`);
+  if (fail) notify.warn(`${fail} failed — check for duplicate tags.`);
 }
 
-function exportCSV(state) {
-  const hdr  = ['Tag','Equipment Type','Location','Make','Model','Quantity','Notes'];
-  const rows = state.items.map(i => [i.tag,i.equipment_type,i.location,i.make,i.model,i.quantity,i.notes||''].map(v=>`"${String(v).replace(/"/g,'""')}"`));
-  const csv  = [hdr.join(','),...rows.map(r=>r.join(','))].join('\n');
-  const a    = document.createElement('a');
-  a.href     = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+function doExportCSV(state) {
+  const hdr  = ['Tag','Type','Make','Model','Qty','Capacity','Filter Size','Location','Voltage','Refrigerant','Notes'];
+  const rows = state.items.map(i=>[i.tag,i.equipment_type,i.make,i.model,i.quantity,i.capacity,i.filter_size,i.location,i.voltage,i.refrigerant,i.notes].map(v=>`"${String(v??'').replace(/"/g,'""')}"`));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([[hdr.join(','),...rows.map(r=>r.join(','))].join('\n')],{type:'text/csv'}));
   a.download = `equipment-extract-${Date.now()}.csv`;
   a.click();
   notify.success('CSV downloaded.');
 }
 
-function esc(v) {
-  return String(v??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
-}
+function x(v) { return String(v??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
