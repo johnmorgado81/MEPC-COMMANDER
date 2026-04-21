@@ -1,390 +1,178 @@
-// js/modules/scope-library.js
-// Pre-written PM scope text for common BC commercial mechanical equipment.
-// Each key matches CONFIG.EQUIPMENT_TYPES. Frequencies: annual, semi-annual, quarterly, monthly.
+// MEPC Commander — Application Configuration
+// ────────────────────────────────────────────
+// REQUIRED BEFORE FIRST USE:
+//   1. Set SUPABASE_URL and SUPABASE_ANON_KEY (from Supabase Dashboard → Settings → API)
+//   2. Update COMPANY block with your company details
+// See docs/setup.md for step-by-step instructions.
 
-export const SCOPE_LIBRARY = {
+export const CONFIG = {
+  SUPABASE_URL:      'https://gcytixguuxluijriosrm.supabase.co',
+  SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdjeXRpeGd1dXhsdWlqcmlvc3JtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2NzgyMDgsImV4cCI6MjA5MDI1NDIwOH0.Jb81RCpCE-dYB2b-H6Pw22gxXtggBqhIBjoqVmcSMf8',
 
-  'Boiler — Hot Water': {
-    annual: [
-      'Inspect and clean combustion chamber, heat exchanger surfaces, and fireside passages.',
-      'Test, calibrate, and record all safety controls: high-limit aquastat, low-water cutoff, LWCO probe, and pressure relief valve operation.',
-      'Inspect and clean burner assembly, flame sensor, and igniter; adjust air/fuel ratio.',
-      'Verify gas manifold and pilot pressure against manufacturer specifications.',
-      'Inspect and clean flue collector, vent connector, and confirm proper draft.',
-      'Test and record operating supply and return water temperatures.',
-      'Check expansion tank air pre-charge; replace tank if waterlogged.',
-      'Inspect and operate circulating pump; check shaft seal and motor amps.',
-      'Check all system pressure and temperature gauges; calibrate or tag defective gauges.',
-      'Inspect isolation and zone valves; lubricate stems where applicable.',
-      'Record operating CO and stack temperature; document combustion analysis.',
-      'Provide written deficiency report with priority classifications.',
-    ],
-    'semi-annual': [
-      'Inspect combustion chamber and heat exchanger for deposits or deterioration.',
-      'Test high-limit and operating controls; verify setpoints.',
-      'Inspect burner, flame sensor, and flue condition.',
-      'Verify operating supply/return temperatures and record.',
-      'Check expansion tank, pump seal, and circulator operation.',
-      'Check system pressure and relief valve condition.',
-      'Report deficiencies in writing.',
-    ],
-    quarterly: [
-      'Visual burner inspection; verify operating pressure and temperatures.',
-      'Test low-water cutoff and operating aquastat.',
-      'Check circulating pump and seal condition.',
-      'Verify flue is clear and vent terminal unobstructed.',
-      'Document readings and report deficiencies.',
-    ],
-    monthly: [
-      'Visual operational check; verify burner is firing correctly.',
-      'Record supply, return temperatures, and system pressure.',
-      'Test low-water cutoff.',
-      'Check pump operation.',
-      'Report any deficiencies immediately.',
-    ],
+  APP_NAME: 'MEPC Commander',
+  VERSION:  '1.1.0',
+
+  TAX_RATE: 0.05,
+  CURRENCY: 'CAD',
+
+  COMPANY: {
+    name:    'MEC Mechanical Inc.',
+    address: '1936 Powell Street',
+    city:    'Vancouver',
+    province:'BC',
+    postal:  'V5L 1J3',
+    phone:   '604-298-8383',
+    email:   'admin@mecmechanical.ca',
+    gst:     '000000000 RT0001',
+    website: 'www.mecmechanical.ca',
   },
 
-  'Boiler — Steam': {
-    annual: [
-      'Full combustion analysis; clean and adjust burner assembly.',
-      'Inspect and clean fireside: combustion chamber, heat exchanger, and flue passages.',
-      'Test all safety controls: LWCO, pressuretrol, pressure relief valve, and gauge glass.',
-      'Inspect and clean water column and gauge glass.',
-      'Test feedwater system and return trap station.',
-      'Check steam traps throughout system; tag failed traps.',
-      'Inspect all steam and return piping for leaks, corrosion, and insulation damage.',
-      'Verify gas pressures at manifold and record combustion parameters.',
-      'Perform water treatment analysis if applicable.',
-      'Provide full written service report with deficiency list.',
-    ],
-    'semi-annual': [
-      'Inspect burner, combustion chamber, and LWCO.',
-      'Test pressuretrol and relief valve.',
-      'Check steam traps on primary mains.',
-      'Inspect water column and gauge glass.',
-      'Record operating steam pressure and return temperatures.',
-      'Report deficiencies in writing.',
-    ],
-    quarterly: [
-      'Visual burner check and operating parameters.',
-      'Test LWCO.',
-      'Check steam pressure and visible trap conditions.',
-      'Report deficiencies.',
-    ],
+  LABOUR_RATES: {
+    weekday_callout: 145.00,
+    weekday_hourly:  115.00,
+    weekend_callout: 260.00,
+    weekend_hourly:  230.00,
+    pm_hourly:       115.00,
+    minimum_hours:   2,
   },
 
-  'Chiller': {
-    annual: [
-      'Log and record all operating parameters: EWT/LWT, condenser in/out, suction and discharge pressures.',
-      'Inspect and clean condenser coil or condenser tubes (scope per unit type).',
-      'Check refrigerant charge; verify no loss from prior season.',
-      'Inspect compressor oil level and condition; send oil sample if applicable.',
-      'Check all safety controls: high/low pressure cutouts, flow switches, and freeze protection.',
-      'Inspect and tighten all electrical connections; verify motor amps.',
-      'Inspect evaporator barrel or DX coil for fouling.',
-      'Check condenser fan blades, motor bearings, and belt drives where applicable.',
-      'Verify control setpoints: LWT, differential, and demand limiting.',
-      'Perform leak check on all refrigerant connections with electronic detector.',
-      'Provide full commissioning report with operating parameter log.',
-    ],
-    'semi-annual': [
-      'Log all operating parameters and compare to design.',
-      'Inspect condenser coil/tubes; clean if fouled.',
-      'Check refrigerant charge and oil level.',
-      'Test safety controls.',
-      'Inspect electrical connections and motor amps.',
-      'Report deficiencies.',
-    ],
-  },
+  // From Material_Markup_Matrix.xlsx
+  MARKUP_MATRIX: [
+    { from: 0.01,    to: 2.49,    multiplier: 3.21, label: '$0.01 – $2.49' },
+    { from: 2.50,    to: 4.99,    multiplier: 2.68, label: '$2.50 – $4.99' },
+    { from: 5.00,    to: 19.99,   multiplier: 2.07, label: '$5.00 – $19.99' },
+    { from: 20.00,   to: 79.99,   multiplier: 1.87, label: '$20.00 – $79.99' },
+    { from: 80.00,   to: 149.99,  multiplier: 1.79, label: '$80.00 – $149.99' },
+    { from: 150.00,  to: 999.99,  multiplier: 1.61, label: '$150.00 – $999.99' },
+    { from: 1000.00, to: 1999.99, multiplier: 1.50, label: '$1,000 – $1,999' },
+    { from: 2000.00, to: 2999.99, multiplier: 1.45, label: '$2,000 – $2,999' },
+    { from: 3000.00, to: null,    multiplier: 1.34, label: '$3,000 and up' },
+  ],
 
-  'Cooling Tower': {
-    annual: [
-      'Drain, flush, and clean basin thoroughly; remove scale and biological deposits.',
-      'Inspect and clean fill media; replace deteriorated sections.',
-      'Inspect drift eliminators; replace if damaged.',
-      'Clean and inspect spray nozzles or distribution system.',
-      'Inspect fan assembly: blades, shaft, bearings, and gear reducer or drive belt.',
-      'Check fan motor condition and amp draw.',
-      'Inspect make-up valve, float, and overflow.',
-      'Verify water treatment dosing equipment is operational.',
-      'Test and calibrate bleed-off conductivity controller.',
-      'Inspect all basin piping, strainers, and connections.',
-      'Provide written service report; coordinate water treatment analysis.',
-    ],
-    'semi-annual': [
-      'Inspect and clean basin; check for biological growth.',
-      'Inspect fill media and drift eliminators.',
-      'Check fan operation, motor, and belt/drive condition.',
-      'Clean spray nozzles.',
-      'Verify make-up and bleed-off operation.',
-      'Report deficiencies.',
-    ],
-  },
+  PROPOSAL_VALID_DAYS: 30,
+  QUOTE_VALID_DAYS:    30,
+  PM_OVERHEAD_PCT:     0.30,
+  PM_MARGIN_PCT:       0.20,
 
-  'AHU / RTU': {
-    annual: [
-      'Replace all filters (MERV per spec); record static pressure across filter bank.',
-      'Inspect and clean supply and return fan wheels and housing.',
-      'Check and re-tension belt drives; replace worn belts.',
-      'Lubricate fan bearings and motor bearings per manufacturer spec.',
-      'Inspect cooling coil and heating coil for fouling; clean with appropriate coil cleaner.',
-      'Inspect drain pan and condensate drain; clean and treat for biological growth.',
-      'Inspect and operate all dampers: OA, return, exhaust, and mixing.',
-      'Check economizer operation and DX staging where applicable.',
-      'Verify all controls: thermostat, discharge air sensor, humidistat, CO₂ where installed.',
-      'Inspect duct connections and unit casing for leaks.',
-      'Check all electrical connections; verify motor amps and VFD parameters if equipped.',
-      'Provide written service report.',
-    ],
-    'semi-annual': [
-      'Replace filters; record static pressures.',
-      'Inspect coils and drain pan.',
-      'Check belt tension and fan bearings.',
-      'Lubricate bearings.',
-      'Inspect dampers and verify economizer function.',
-      'Record supply air temperature and verify controls.',
-      'Report deficiencies.',
-    ],
-    quarterly: [
-      'Replace or inspect filters.',
-      'Check belt drives and bearings.',
-      'Inspect drain pan.',
-      'Verify unit operation and controls.',
-      'Report deficiencies.',
-    ],
-    monthly: [
-      'Inspect and replace filters as required.',
-      'Verify unit operation.',
-      'Check drain pan condition.',
-      'Report deficiencies.',
-    ],
-  },
+  FREQUENCIES: [
+    { value: 'monthly',     label: 'Monthly',     visits: 12 },
+    { value: 'quarterly',   label: 'Quarterly',   visits: 4  },
+    { value: 'semi-annual', label: 'Semi-Annual', visits: 2  },
+    { value: 'annual',      label: 'Annual',      visits: 1  },
+    { value: 'custom',      label: 'Custom',      visits: 0  },
+  ],
 
-  'Make-Up Air Unit': {
-    annual: [
-      'Replace all filters; record static pressures.',
-      'Inspect heat exchanger (gas-fired) or heating coil (hot water); clean if required.',
-      'Check burner assembly, ignition, and flame sensor (gas-fired).',
-      'Verify all controls: modulating gas valve, discharge air temperature, and setpoints.',
-      'Inspect supply fan, motor, and drive assembly.',
-      'Inspect and operate fresh air and relief dampers.',
-      'Check economizer or enthalpy wheel if equipped.',
-      'Verify unit interlocks and exhaust relationship.',
-      'Provide written service report.',
-    ],
-    'semi-annual': [
-      'Replace filters.',
-      'Inspect burner and combustion assembly.',
-      'Check heat exchanger.',
-      'Verify controls and setpoints.',
-      'Inspect fan and dampers.',
-      'Report deficiencies.',
-    ],
-  },
+  QUOTE_STATUSES:    ['draft','sent','pending-approval','approved','deferred','declined','expired'],
+  PROPOSAL_STATUSES: ['draft','sent','accepted','active','expired','cancelled'],
 
-  'Fan Coil Unit': {
-    annual: [
-      'Clean or replace filter; record static differential.',
-      'Clean fan wheel and housing.',
-      'Lubricate fan motor bearings if applicable.',
-      'Clean coil fin surface.',
-      'Inspect condensate pan and drain.',
-      'Verify control valve operation (2-way or 3-way).',
-      'Check thermostat operation and setpoints.',
-      'Report deficiencies.',
-    ],
-    'semi-annual': [
-      'Replace or clean filter.',
-      'Inspect coil and drain pan.',
-      'Verify valve and thermostat operation.',
-      'Report deficiencies.',
-    ],
-    quarterly: [
-      'Inspect filter; replace if required.',
-      'Verify unit operation.',
-      'Check drain pan.',
-    ],
-  },
+  EQUIPMENT_CATEGORIES: [
+    'HVAC','Hydronic','Plumbing','Drainage','Controls',
+    'Backup & Fuel','Chemical Treatment','Pool','Irrigation',
+    'Compressed Air','Radiant / Snowmelt','Meters & Gauges','Valves',
+  ],
 
-  'Water Source Heat Pump': {
-    annual: [
-      'Record entering and leaving water temperatures and compare to design.',
-      'Check refrigerant charge; inspect for leaks.',
-      'Clean or replace filter.',
-      'Clean coil surfaces.',
-      'Check reversing valve operation in both heating and cooling modes.',
-      'Inspect condensate pan and drain.',
-      'Verify all controls and thermostat setpoints.',
-      'Check electrical connections and motor amps.',
-      'Report deficiencies.',
-    ],
-    'semi-annual': [
-      'Replace filter.',
-      'Check refrigerant charge and reversing valve.',
-      'Record loop water temperatures.',
-      'Inspect coil and drain pan.',
-      'Verify controls.',
-      'Report deficiencies.',
-    ],
-  },
+  CONDITION_OPTIONS:  ['Excellent','Good','Fair','Poor','Critical'],
+  BUILDING_TYPES:     ['Commercial','Strata / Residential','Industrial','Institutional','Mixed-Use','Highrise'],
 
-  'Circulation Pump': {
-    annual: [
-      'Check pump and motor alignment.',
-      'Inspect mechanical seal for leakage; replace if weeping.',
-      'Lubricate motor bearings (grease-lubricated type).',
-      'Check motor amp draw against nameplate FLA.',
-      'Inspect coupling and flexible connectors.',
-      'Verify pump rotation direction.',
-      'Check isolation and balance valves.',
-      'Record system differential pressure.',
-      'Report deficiencies.',
-    ],
-    'semi-annual': [
-      'Inspect mechanical seal condition.',
-      'Check motor amps and bearing temperatures.',
-      'Lubricate bearings if applicable.',
-      'Verify operation and system pressure.',
-      'Report deficiencies.',
-    ],
-    quarterly: [
-      'Visual inspection of seal and motor.',
-      'Record motor amps.',
-      'Verify pump is running smoothly.',
-    ],
-  },
+  SERVICE_AREAS: [
+    { value: 'common_strata',        label: 'Common Strata Areas' },
+    { value: 'commercial',           label: 'Commercial Areas' },
+    { value: 'residential_in_suite', label: 'Residential / In-Suite' },
+  ],
 
-  'Plate Heat Exchanger': {
-    annual: [
-      'Inspect all connections for leaks.',
-      'Check plate pack tightness (bolt torque).',
-      'Verify approach temperatures on both circuits against design values.',
-      'Inspect isolation valves and strainers.',
-      'Clean strainers on both circuits.',
-      'Report fouling indicators and recommend chemical cleaning if approach is degraded.',
-    ],
-    'semi-annual': [
-      'Inspect connections and gaskets for leaks.',
-      'Check approach temperatures.',
-      'Clean strainers.',
-      'Report deficiencies.',
-    ],
-  },
+  // Full equipment type list — selectable in forms
+  EQUIPMENT_TYPES: [
+    // HVAC
+    'Air Handling Unit','Rooftop Unit','Fan Coil Unit','Make-Up Air Unit',
+    'Heat Recovery Ventilator','Energy Recovery Ventilator','Variable Air Volume Box',
+    'Unit Ventilator','Split System','VRF / VRV System','Exhaust Fan','Supply Fan',
+    // Hydronic
+    'Hot Water Boiler','Steam Boiler','Condensing Boiler',
+    'Chiller','Cooling Tower','Condenser',
+    'Plate Heat Exchanger','Shell & Tube Heat Exchanger',
+    'Circulation Pump','Domestic Water Pump','Condensate Pump','Booster Pump',
+    'Expansion Tank','Pressure Reducing Valve','Pressure Relief Valve',
+    // Plumbing
+    'Domestic Hot Water Heater','Storage Tank','Indirect Water Heater','Tankless Water Heater',
+    'Backflow Preventer','Sump Pump','Sewage Ejector',
+    'Grease Interceptor','Sand Interceptor',
+    // Gas
+    'Gas Fireplace','Gas Barbeque','Gas Fire Pit','Gas Unit Heater','Gas Infrared Heater',
+    // Controls
+    'BAS Controller','DDC Panel','Network Controller','Variable Frequency Drive','Thermostat',
+    // Drainage
+    'Storm Pump','Duplex Sump Pump','Lift Station',
+    // Other
+    'Air Compressor','Snowmelt Pump','Pool Pump','Pool Heater','Irrigation Pump',
+    'Generator','Transfer Switch','Fuel Oil Tank',
+    'Chemical Feeder','Side Stream Filter','Conductivity Controller',
+    'Other',
+  ],
 
-  'Expansion Tank': {
-    annual: [
-      'Verify system fill pressure against tank pre-charge specification.',
-      'Check tank air charge (de-pressurize circuit and check with gauge).',
-      'Inspect tank bladder for waterlogging (weight test).',
-      'Check isolation valve and Schrader valve condition.',
-      'Record findings and recommend replacement if bladder failure is confirmed.',
-    ],
-  },
+  // Equipment class — normalized for EQUIPMASTER lookup and scope templates
+  EQUIPMENT_CLASSES: [
+    'Air Handling Unit','Rooftop Unit','Fan Coil Unit','Make-Up Air Unit','HRV/ERV',
+    'Split System','VRF System','Exhaust Fan','VAV Box',
+    'Boiler','Chiller','Cooling Tower','Heat Exchanger',
+    'Pump','Expansion Tank','PRV','Backflow Preventer',
+    'Water Heater','Storage Tank',
+    'Fireplace','Barbeque','Unit Heater',
+    'BAS Controller','DDC Panel','VFD','Thermostat',
+    'Sump Pump','Sewage Ejector','Grease Interceptor',
+    'Air Compressor','Generator','Pool Equipment','Irrigation',
+    'Chemical Treatment','Other',
+  ],
 
-  'Backflow Preventer': {
-    annual: [
-      'Perform annual test per AWWA standards and BC Plumbing Code requirements.',
-      'Record test results on certified form.',
-      'Inspect relief valve and check valves.',
-      'Replace internal components if test fails.',
-      'Provide signed test report for municipality records.',
-    ],
-  },
+  EQUIPMENT_CATEGORIES: [
+    'HVAC','Hydronic','Plumbing','Gas','Drainage','Controls',
+    'Backup & Fuel','Chemical Treatment','Pool','Irrigation',
+    'Compressed Air','Radiant / Snowmelt','Meters & Gauges','Valves',
+    'Fire Protection','Other',
+  ],
 
-  'Pressure Reducing Valve': {
-    annual: [
-      'Check downstream pressure against setpoint.',
-      'Inspect for leakage across valve seat.',
-      'Verify strainer condition upstream.',
-      'Test bypass operation if equipped.',
-      'Adjust setpoint if required.',
-      'Report if replacement is recommended due to age or internal wear.',
-    ],
-  },
+  SUBCONTRACTOR_CATEGORIES: [
+    'DDC Controls Management',
+    'Chemical Treatment Management',
+    'HVAC/R Subcontractor',
+    'Fire Sprinkler Contractor',
+  ],
 
-  'Domestic Water Heater': {
-    annual: [
-      'Flush tank to remove sediment accumulation.',
-      'Test temperature-pressure relief valve (TPRV); tag if not operational.',
-      'Inspect anode rod; replace if more than 50% depleted.',
-      'Check and adjust thermostat setpoint (minimum 60°C per BC code).',
-      'Inspect burner or element condition.',
-      'Inspect flue and draft hood (gas-fired).',
-      'Check expansion tank if closed system.',
-      'Report deficiencies.',
-    ],
-    'semi-annual': [
-      'Test TPRV.',
-      'Check thermostat setpoint.',
-      'Inspect burner or element.',
-      'Report deficiencies.',
-    ],
-  },
-
-  'Exhaust Fan': {
-    annual: [
-      'Clean fan wheel and housing.',
-      'Lubricate bearings (if applicable).',
-      'Check belt drive condition and tension.',
-      'Verify motor amp draw.',
-      'Inspect damper operation.',
-      'Verify CFM output against design (pitot or anemometer).',
-      'Report deficiencies.',
-    ],
-    'semi-annual': [
-      'Inspect fan wheel and housing.',
-      'Check belt and bearings.',
-      'Verify operation.',
-      'Report deficiencies.',
-    ],
-  },
-
-  'Split System / DX': {
-    annual: [
-      'Clean condenser coil; check for physical damage.',
-      'Clean evaporator coil (accessible).',
-      'Check refrigerant charge via subcooling/superheat method.',
-      'Inspect condensate pan and drain line.',
-      'Check electrical connections and capacitors.',
-      'Verify controls and thermostat operation.',
-      'Record operating parameters.',
-      'Report deficiencies.',
-    ],
-    'semi-annual': [
-      'Clean or inspect coils.',
-      'Check refrigerant charge.',
-      'Inspect drain pan.',
-      'Verify controls.',
-      'Report deficiencies.',
-    ],
-  },
-
-  'VRF System': {
-    annual: [
-      'Log all operating parameters per manufacturer protocol.',
-      'Inspect outdoor unit: fan, coil, compressor compartment.',
-      'Check refrigerant charge using system diagnostics.',
-      'Inspect all indoor unit filters and coils.',
-      'Download fault codes and error log from controller.',
-      'Verify all refrigerant line set connections for leakage.',
-      'Check system controls, setpoints, and scheduling.',
-      'Report deficiencies.',
-    ],
-  },
-
-  'Other': {
-    annual: [
-      'Perform general inspection and operational check.',
-      'Verify all safety controls are functional.',
-      'Check for leaks, unusual wear, and signs of deterioration.',
-      'Record operating parameters.',
-      'Report deficiencies in writing.',
-    ],
-  },
+  DEFICIENCY_PRIORITIES: [
+    { value: 'Critical', label: 'Critical', color: '#dc2626' },
+    { value: 'High',     label: 'High',     color: '#f97316' },
+    { value: 'Medium',   label: 'Medium',   color: '#d97706' },
+    { value: 'Low',      label: 'Low',      color: '#64748b' },
+  ],
 };
 
-export function getScopeText(equipType, frequency) {
-  const entry = SCOPE_LIBRARY[equipType];
-  if (!entry) return SCOPE_LIBRARY['Other'].annual;
-  return entry[frequency] || entry['annual'] || SCOPE_LIBRARY['Other'].annual;
+export function getMarkupMultiplier(costDollars) {
+  for (const tier of CONFIG.MARKUP_MATRIX) {
+    if (costDollars >= tier.from && (tier.to === null || costDollars <= tier.to)) {
+      return tier.multiplier;
+    }
+  }
+  return 1.34;
+}
+
+export function applyMarkup(costDollars) {
+  return +(costDollars * getMarkupMultiplier(costDollars)).toFixed(2);
+}
+
+// ─── Sync CONFIG lists from EQUIPMASTER at startup ──────────────────────────
+// Called from app.js after module loads
+export function syncConfigFromEquipmaster(equipmaster) {
+  if (!equipmaster || !equipmaster.length) return;
+  // Derive unique sorted types from dataset (preserving hand-curated EQUIPMENT_TYPES order for existing values)
+  const liveTypes = [...new Set(equipmaster.map(e => e.equipment_type))].sort();
+  // Merge: keep any existing types not in EQUIPMASTER, add new ones from EQUIPMASTER
+  const merged = [...new Set([...liveTypes, ...CONFIG.EQUIPMENT_TYPES])].sort();
+  CONFIG.EQUIPMENT_TYPES = merged;
+  // Categories straight from dataset
+  CONFIG.EQUIPMENT_CATEGORIES = [...new Set(equipmaster.map(e => e.category).filter(Boolean))].sort();
+}
+
+export function calcPMSellPrice(totalHours) {
+  const labourCost   = totalHours * CONFIG.LABOUR_RATES.pm_hourly;
+  const withOverhead = labourCost * (1 + CONFIG.PM_OVERHEAD_PCT);
+  return +(withOverhead / (1 - CONFIG.PM_MARGIN_PCT)).toFixed(2);
 }

@@ -1,483 +1,413 @@
-// js/modules/quotes.js
-import { setPageTitle }   from './app.js';
-import { Quotes as DB, Buildings, Deficiencies, MarkupMatrix } from './db.js';
-import { CONFIG, applyMarkup, getMarkupMultiplier } from './config.js';
-import { generateQuotePDF } from './pdf-export.js';
-import { formatCurrency, formatDate, statusBadge, today, addDays, pad, isOverdue } from './helpers.js';
-import { openModal, closeModal, confirm, notify, makeSortable, spinner, emptyState } from './ui.js';
-import { navigate }       from './router.js';
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Barlow+Condensed:wght@500;600;700&display=swap');
 
-export const Quotes = {
+/* ─── TOKENS ──────────────────────────────────────────────── */
+:root {
+  --bg:          #0b0d10;
+  --bg2:         #111419;
+  --bg3:         #171c23;
+  --bg4:         #1d232c;
+  --border:      #222933;
+  --border2:     #2d3748;
+  --text:        #dde3ec;
+  --text-dim:    #94a3b8;
+  --text-muted:  #4d5d70;
+  --orange:      #3b82f6;
+  --orange-dim:  #2563eb;
+  --orange-glow: rgba(59,130,246,.12);
+  --blue:        #38bdf8;
+  --blue-dim:    #0284c7;
+  --green:       #22c55e;
+  --green-dim:   #15803d;
+  --red:         #ef4444;
+  --red-dim:     #b91c1c;
+  --yellow:      #f59e0b;
+  --purple:      #a78bfa;
+  --sidebar-w:   220px;
+  --topbar-h:    52px;
+  --radius:      4px;
+  --radius-lg:   6px;
+  --font:        'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono:   'IBM Plex Mono', 'Fira Mono', monospace;
+  --font-cond:   'Barlow Condensed', sans-serif;
+  --shadow:      0 1px 3px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.25);
+  --shadow-lg:   0 4px 24px rgba(0,0,0,.55);
+}
 
-  async init(container) {
-    setPageTitle('Quote Funnel');
-    container.innerHTML = `<div class="page-wrap">
-      <div class="toolbar">
-        <select id="q-filter-status" class="input" style="max-width:180px">
-          <option value="">All Status</option>
-          ${CONFIG.QUOTE_STATUSES.map(s => `<option>${s}</option>`).join('')}
-        </select>
-        <div class="toolbar-right">
-          <button class="btn btn-primary" id="q-new-btn">+ New Quote</button>
-        </div>
-      </div>
-      <div id="q-pipeline-banner"></div>
-      <div class="card"><div id="q-table-wrap">${spinner()}</div></div>
-    </div>`;
-    await this.loadTable();
-    document.getElementById('q-new-btn').onclick = () => navigate('/quotes/new');
-    document.getElementById('q-filter-status').onchange = (e) => this.filterByStatus(e.target.value);
-  },
+/* ─── RESET ───────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{height:100%;font-size:14px;-webkit-font-smoothing:antialiased}
+body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.55;overflow:hidden}
+a{color:var(--blue);text-decoration:none}
+a:hover{color:#7dd3fc}
 
-  filterByStatus(status) {
-    const tbl = document.querySelector('#q-table-wrap table');
-    if (!tbl) return;
-    tbl.querySelectorAll('tbody tr').forEach(tr => {
-      tr.hidden = status ? !tr.dataset.status?.includes(status) : false;
-    });
-  },
+/* ─── APP SHELL ───────────────────────────────────────────── */
+#app-shell{display:flex;height:100vh;overflow:hidden}
 
-  async loadTable() {
-    const wrap = document.getElementById('q-table-wrap');
-    try {
-      const rows = await DB.getAll();
-      if (!rows.length) { wrap.innerHTML = emptyState('No quotes yet.'); return; }
+/* ─── SIDEBAR ─────────────────────────────────────────────── */
+#sidebar{
+  width:var(--sidebar-w);min-width:var(--sidebar-w);
+  background:var(--bg2);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;overflow:hidden;position:relative;
+}
+#sidebar::after{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--orange) 0%,var(--blue-dim,#0284c7) 100%);
+}
+.sidebar-logo{padding:18px 16px 14px;border-bottom:1px solid var(--border)}
+.logo-name{
+  font-family:var(--font-cond);font-size:17px;font-weight:700;
+  letter-spacing:.06em;color:var(--orange);text-transform:uppercase;
+}
+.logo-sub{font-size:10.5px;color:var(--text-muted);letter-spacing:.04em;margin-top:2px;text-transform:uppercase}
+.sidebar-nav{flex:1;overflow-y:auto;padding:8px 0;scrollbar-width:none}
+.sidebar-nav::-webkit-scrollbar{display:none}
+.nav-item{
+  display:flex;align-items:center;gap:10px;padding:8px 16px;
+  color:var(--text-dim);font-size:12.5px;font-weight:500;letter-spacing:.02em;
+  border-left:2px solid transparent;
+  transition:background .12s,color .12s,border-color .12s;cursor:pointer;
+}
+.nav-item:hover{background:var(--bg3);color:var(--text)}
+.nav-item.active{background:var(--orange-glow);color:var(--orange);border-left-color:var(--orange)}
+.nav-icon{font-size:13px;width:18px;text-align:center;flex-shrink:0}
+.nav-label{flex:1}
 
-      // Pipeline summary — track all active statuses
-      const openStatuses   = ['draft','sent','pending-approval'];
-      const pipelineRows   = rows.filter(q => openStatuses.includes(q.status));
-      const pipelineVal    = pipelineRows.reduce((s, q) => s + Number(q.total || 0), 0);
-      const pendingAppr    = rows.filter(q => q.status === 'pending-approval');
-      const approved       = rows.filter(q => q.status === 'approved');
-      const deferred       = rows.filter(q => q.status === 'deferred');
-      const followupDue    = rows.filter(q => q.status === 'sent' && q.follow_up_date && isOverdue(q.follow_up_date));
-      const banner = document.getElementById('q-pipeline-banner');
-      if (banner) {
-        banner.innerHTML = `<div class="pipeline-banner">
-          <div class="pipeline-stat">
-            <span class="pipeline-val">${formatCurrency(pipelineVal)}</span>
-            <span class="pipeline-label">Open Pipeline</span>
-          </div>
-          <div class="pipeline-stat">
-            <span class="pipeline-val">${pipelineRows.length}</span>
-            <span class="pipeline-label">Open Quotes</span>
-          </div>
-          <div class="pipeline-stat ${pendingAppr.length ? 'pipeline-warn' : ''}">
-            <span class="pipeline-val">${pendingAppr.length}</span>
-            <span class="pipeline-label">Pending Approval</span>
-          </div>
-          <div class="pipeline-stat pipeline-success">
-            <span class="pipeline-val">${approved.length}</span>
-            <span class="pipeline-label">Approved</span>
-          </div>
-          <div class="pipeline-stat ${deferred.length ? 'pipeline-muted' : ''}">
-            <span class="pipeline-val">${deferred.length}</span>
-            <span class="pipeline-label">Deferred</span>
-          </div>
-          <div class="pipeline-stat ${followupDue.length ? 'pipeline-alert' : ''}">
-            <span class="pipeline-val">${followupDue.length}</span>
-            <span class="pipeline-label">Follow-Ups Due</span>
-          </div>
-        </div>`;
-      }
+/* ─── MAIN WRAP ───────────────────────────────────────────── */
+#main-wrap{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+#topbar{
+  height:var(--topbar-h);min-height:var(--topbar-h);
+  background:var(--bg2);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;padding:0 20px;gap:12px;
+}
+#topbar-title{
+  font-family:var(--font-cond);font-size:15px;font-weight:600;
+  letter-spacing:.05em;color:var(--text);text-transform:uppercase;
+}
+.topbar-spacer{flex:1}
+#content{
+  flex:1;overflow-y:auto;padding:20px;
+  scrollbar-width:thin;scrollbar-color:var(--border2) transparent;
+}
+#content::-webkit-scrollbar{width:6px}
+#content::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+.page-wrap{max-width:1320px}
 
-      wrap.innerHTML = `<table class="table" id="q-table">
-        <thead><tr>
-          <th>#</th><th>Building</th><th>Client</th><th>Title</th>
-          <th>Total</th><th>Status</th><th>Sent</th><th>Follow Up</th><th></th>
-        </tr></thead>
-        <tbody>${rows.map(q => `<tr data-status="${q.status}">
-          <td><a href="#/quotes/${q.id}" class="link-strong">${q.quote_number}</a></td>
-          <td>${q.buildings?.name || '—'}</td>
-          <td>${q.buildings?.client_name || '—'}</td>
-          <td>${q.title || '—'}</td>
-          <td><strong>${formatCurrency(q.total)}</strong></td>
-          <td>${statusBadge(q.status)}</td>
-          <td>${formatDate(q.sent_date)}</td>
-          <td class="${q.status === 'sent' && isOverdue(q.follow_up_date) ? 'text-danger fw-bold' : ''}">
-            ${formatDate(q.follow_up_date)}
-            ${q.status === 'sent' && isOverdue(q.follow_up_date) ? ' ⚠' : ''}
-          </td>
-          <td class="actions">
-            <a href="#/quotes/${q.id}" class="btn btn-xs btn-secondary">View</a>
-            <button class="btn btn-xs btn-danger" data-delete="${q.id}">Delete</button>
-          </td>
-        </tr>`).join('')}</tbody>
-      </table>`;
-      makeSortable(document.getElementById('q-table'));
-      wrap.querySelectorAll('[data-delete]').forEach(btn =>
-        btn.onclick = () => this.deleteQuote(btn.dataset.delete));
-    } catch (e) {
-      wrap.innerHTML = `<div class="error-state">${e.message}</div>`;
-    }
-  },
+/* ─── TOOLBAR ─────────────────────────────────────────────── */
+.toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.toolbar-right{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.toolbar-left{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 
-  async create(container) {
-    setPageTitle('New Quote', [{ label: 'Quotes', href: '#/quotes' }, { label: 'New' }]);
-    let buildings = [];
-    try { buildings = await Buildings.getAll(); } catch {}
+/* ─── CARD ────────────────────────────────────────────────── */
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow)}
+.card+.card{margin-top:14px}
+.card-header{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:12px 16px;border-bottom:1px solid var(--border);background:var(--bg3);
+}
+.card-header h3{
+  font-family:var(--font-cond);font-size:12.5px;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin:0;
+}
+.card-body{padding:16px}
+.card-body.no-pad{padding:0}
+.card-footer{padding:10px 16px;border-top:1px solid var(--border);background:var(--bg3)}
 
-    container.innerHTML = `<div class="page-wrap">
-      <div class="card">
-        <div class="card-header"><h3>Quote Details</h3></div>
-        <div class="card-body">
-          <div class="form-row">
-            <div class="form-group">
-              <label>Building *</label>
-              <select id="q-building" class="input">
-                <option value="">— Select —</option>
-                ${buildings.map(b => `<option value="${b.id}">${b.name} — ${b.client_name || ''}</option>`).join('')}
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Quote Title</label>
-              <input id="q-title" class="input" placeholder="e.g. Boiler Repair — B-1">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Payment Terms</label>
-              <input id="q-pay-terms" class="input" value="Net 30">
-            </div>
-            <div class="form-group">
-              <label>Valid Until</label>
-              <input type="date" id="q-valid" class="input" value="${addDays(today(), CONFIG.QUOTE_VALID_DAYS)}">
-            </div>
-            <div class="form-group">
-              <label>Follow-Up Date</label>
-              <input type="date" id="q-followup" class="input" value="${addDays(today(), 7)}">
-            </div>
-          </div>
-        </div>
-      </div>
+/* ─── KPI ─────────────────────────────────────────────────── */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+@media(max-width:900px){.kpi-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.kpi-grid{grid-template-columns:1fr}}
+.kpi-card{
+  background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);
+  padding:16px 18px 14px;position:relative;overflow:hidden;
+  transition:border-color .15s,transform .12s;cursor:pointer;
+}
+.kpi-card:hover{border-color:var(--border2);transform:translateY(-1px)}
+.kpi-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:var(--kpi-color,var(--orange));
+}
+.kpi-value{
+  font-family:var(--font-cond);font-size:28px;font-weight:700;
+  color:var(--kpi-color,var(--orange));line-height:1;margin-bottom:5px;letter-spacing:-.01em;
+}
+.kpi-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted)}
+.kpi-bar{display:none}
+.kpi-card.skeleton{background:var(--bg3);animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:.75}}
 
-      <div class="card" style="margin-top:1rem">
-        <div class="card-header">
-          <h3>Line Items</h3>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-sm btn-secondary" id="q-add-labour">+ Labour</button>
-            <button class="btn btn-sm btn-secondary" id="q-add-material">+ Material (with markup)</button>
-            <button class="btn btn-sm btn-secondary" id="q-add-line">+ Custom Line</button>
-          </div>
-        </div>
-        <div class="card-body" id="q-lines-wrap">
-          <p class="muted">No line items yet.</p>
-        </div>
-      </div>
+/* ─── DASH GRID ───────────────────────────────────────────── */
+.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:900px){.dash-grid{grid-template-columns:1fr}}
 
-      <div class="card" style="margin-top:1rem">
-        <div class="card-header"><h3>Totals</h3></div>
-        <div class="card-body">
-          <div id="q-totals" class="totals-block"></div>
-          <div class="form-group" style="margin-top:.75rem">
-            <label>Notes (visible on quote)</label>
-            <textarea id="q-notes" class="input" rows="3"></textarea>
-          </div>
-          <div class="form-group">
-            <label>Internal Notes</label>
-            <textarea id="q-int-notes" class="input" rows="2"></textarea>
-          </div>
-        </div>
-      </div>
+/* ─── TABLES ──────────────────────────────────────────────── */
+.table-wrap{overflow-x:auto}
+table.table{width:100%;border-collapse:collapse;font-size:13px}
+.table thead tr{background:var(--bg3);border-bottom:1px solid var(--border2)}
+.table th{
+  padding:9px 12px;text-align:left;
+  font-family:var(--font-cond);font-size:10.5px;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);white-space:nowrap;
+}
+.table tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
+.table tbody tr:last-child{border-bottom:none}
+.table tbody tr:hover{background:var(--bg3)}
+.table td{padding:9px 12px;vertical-align:middle;color:var(--text)}
+.table.table-compact th,.table.table-compact td{padding:7px 10px;font-size:12.5px}
+.table td.actions{white-space:nowrap;text-align:right}
+.link-strong{font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--orange);letter-spacing:.02em}
+.link-strong:hover{color:#fdba74}
 
-      <div class="toolbar" style="margin-top:1rem">
-        <button class="btn btn-secondary" onclick="history.back()">Cancel</button>
-        <button class="btn btn-primary" id="q-save-btn">Save Quote</button>
-      </div>
-    </div>`;
+/* ─── BUTTONS ─────────────────────────────────────────────── */
+.btn{
+  display:inline-flex;align-items:center;gap:6px;padding:7px 14px;
+  font-family:var(--font);font-size:12.5px;font-weight:600;letter-spacing:.03em;
+  border-radius:var(--radius);border:1px solid transparent;cursor:pointer;
+  transition:background .13s,border-color .13s,color .13s,transform .1s;
+  white-space:nowrap;line-height:1.2;
+}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:var(--orange);border-color:var(--orange);color:#fff}
+.btn-primary:hover{background:var(--orange-dim);border-color:var(--orange-dim)}
+.btn-secondary{background:var(--bg4);border-color:var(--border2);color:var(--text-dim)}
+.btn-secondary:hover{background:var(--bg3);color:var(--text)}
+.btn-danger{background:transparent;border-color:var(--red-dim);color:var(--red)}
+.btn-danger:hover{background:var(--red-dim);color:#fff}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--text-dim)}
+.btn-ghost:hover{background:var(--bg3);color:var(--text)}
+.btn-sm{padding:5px 10px;font-size:11.5px}
+.btn-xs{padding:3px 8px;font-size:11px}
+.btn:disabled{opacity:.45;cursor:not-allowed;pointer-events:none}
+.w-full{width:100%;justify-content:center}
 
-    this._lines = [];
-    document.getElementById('q-add-line').onclick     = () => this.addLine();
-    document.getElementById('q-add-labour').onclick   = () => this.addLabourLine();
-    document.getElementById('q-add-material').onclick = () => this.addMaterialLine();
-    document.getElementById('q-save-btn').onclick     = () => this.saveQuote();
-  },
+/* ─── FORMS ───────────────────────────────────────────────── */
+.form-group{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+.form-group:last-child{margin-bottom:0}
+.form-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:14px}
+label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted)}
+.input,input[type="text"],input[type="email"],input[type="number"],
+input[type="date"],input[type="search"],select,textarea{
+  background:var(--bg);border:1px solid var(--border2);border-radius:var(--radius);
+  color:var(--text);font-family:var(--font);font-size:13px;padding:7px 10px;
+  width:100%;transition:border-color .13s,box-shadow .13s;-webkit-appearance:none;appearance:none;
+}
+.input:focus,input[type="text"]:focus,input[type="email"]:focus,
+input[type="number"]:focus,input[type="date"]:focus,input[type="search"]:focus,
+select:focus,textarea:focus{
+  outline:none;border-color:var(--orange);box-shadow:0 0 0 2px var(--orange-glow);
+}
+.input.input-sm{padding:5px 8px;font-size:12px}
+select{
+  cursor:pointer;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 8px center;padding-right:26px;
+}
+select option{background:var(--bg3);color:var(--text)}
+textarea{resize:vertical;min-height:80px;line-height:1.5}
+input[type="checkbox"]{width:15px;height:15px;cursor:pointer;accent-color:var(--orange)}
+::placeholder{color:var(--text-muted);opacity:1}
 
-  addLabourLine() {
-    const rates = CONFIG.LABOUR_RATES;
-    openModal('Add Labour Line', `
-      <div class="form-row">
-        <div class="form-group">
-          <label>Description</label>
-          <input id="lab-desc" class="input" value="Labour — ">
-        </div>
-        <div class="form-group">
-          <label>Hours</label>
-          <input type="number" id="lab-hrs" class="input" step="0.5" value="2">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Rate Type</label>
-          <select id="lab-rate-type" class="input">
-            <option value="${rates.weekday_hourly}">Weekday — $${rates.weekday_hourly}/hr</option>
-            <option value="${rates.weekend_hourly}">Weekend/OT — $${rates.weekend_hourly}/hr</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Include Callout?</label>
-          <select id="lab-callout" class="input">
-            <option value="0">No callout</option>
-            <option value="${rates.weekday_callout}" selected>Weekday callout — $${rates.weekday_callout}</option>
-            <option value="${rates.weekend_callout}">Weekend callout — $${rates.weekend_callout}</option>
-          </select>
-        </div>
-      </div>
-      <div id="lab-preview" class="text-muted" style="margin-top:8px;font-size:13px"></div>
-    `, [
-      { label: 'Cancel', class: 'btn-secondary', onClick: closeModal },
-      { label: 'Add Line', class: 'btn-primary', onClick: () => {
-        const desc     = document.getElementById('lab-desc')?.value || 'Labour';
-        const hrs      = parseFloat(document.getElementById('lab-hrs')?.value || 2);
-        const rate     = parseFloat(document.getElementById('lab-rate-type')?.value || rates.weekday_hourly);
-        const callout  = parseFloat(document.getElementById('lab-callout')?.value || 0);
-        const billHrs  = Math.max(hrs, rates.minimum_hours);
-        const total    = callout + (billHrs * rate);
-        this.addLine({ description: desc, qty: 1, unit: 'ls', unit_price: total, total });
-        closeModal();
-      }},
-    ]);
+/* ─── STATUS BADGES ───────────────────────────────────────── */
+.status-badge{
+  display:inline-flex;align-items:center;padding:2px 7px;
+  border-radius:2px;font-family:var(--font-cond);font-size:11px;font-weight:700;
+  letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;
+}
+.status-draft{background:rgba(100,116,139,.18);color:#94a3b8}
+.status-sent{background:rgba(56,189,248,.18);color:var(--blue)}
+.status-active{background:rgba(34,197,94,.18);color:var(--green)}
+.status-accepted{background:rgba(34,197,94,.18);color:var(--green)}
+.status-approved{background:rgba(34,197,94,.18);color:var(--green)}
+.status-pending-approval{background:rgba(245,158,11,.18);color:var(--yellow)}
+.status-expired,.status-cancelled,.status-deferred{background:rgba(100,116,139,.12);color:var(--text-muted)}
+.status-declined{background:rgba(239,68,68,.18);color:var(--red)}
+.status-open{background:rgba(239,68,68,.18);color:var(--red)}
+.status-quoted{background:rgba(56,189,248,.18);color:var(--blue)}
+.status-in-progress{background:rgba(167,139,250,.18);color:var(--purple)}
+.status-resolved,.status-closed{background:rgba(34,197,94,.1);color:var(--green-dim)}
+.status-critical{background:rgba(239,68,68,.25);color:var(--red)}
+.status-high{background:rgba(59,130,246,.2);color:var(--orange)}
+.status-medium{background:rgba(245,158,11,.18);color:var(--yellow)}
+.status-low{background:rgba(100,116,139,.14);color:var(--text-muted)}
+.status-inactive,.status-retired{background:rgba(100,116,139,.08);color:var(--text-muted)}
 
-    // Live preview
-    const updatePreview = () => {
-      const hrs     = parseFloat(document.getElementById('lab-hrs')?.value || 2);
-      const rate    = parseFloat(document.getElementById('lab-rate-type')?.value || rates.weekday_hourly);
-      const callout = parseFloat(document.getElementById('lab-callout')?.value || 0);
-      const billHrs = Math.max(hrs, rates.minimum_hours);
-      const total   = callout + (billHrs * rate);
-      const prev    = document.getElementById('lab-preview');
-      if (prev) prev.textContent = `Estimated: ${formatCurrency(callout)} callout + ${billHrs} hrs × $${rate} = ${formatCurrency(total)}`;
-    };
-    setTimeout(() => {
-      ['lab-hrs','lab-rate-type','lab-callout'].forEach(id =>
-        document.getElementById(id)?.addEventListener('input', updatePreview)
-      );
-      updatePreview();
-    }, 50);
-  },
+/* ─── DETAIL FIELDS ───────────────────────────────────────── */
+.detail-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:640px){.detail-fields{grid-template-columns:1fr}}
+.detail-field{display:flex;flex-direction:column;gap:3px}
+.detail-label{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted)}
+.detail-value{font-size:13.5px;color:var(--text)}
 
-  addMaterialLine() {
-    openModal('Add Material with Markup', `
-      <p class="text-muted mb-8" style="font-size:13px">
-        Enter your cost (what you pay). Sell price is calculated using the markup matrix.
-      </p>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Material Description</label>
-          <input id="mat-desc" class="input" placeholder="e.g. Ball valve 1½″">
-        </div>
-        <div class="form-group">
-          <label>Qty</label>
-          <input type="number" id="mat-qty" class="input" value="1" min="1">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Your Cost per Unit ($)</label>
-          <input type="number" id="mat-cost" class="input" step="0.01" placeholder="0.00">
-        </div>
-        <div class="form-group">
-          <label>Sell Price per Unit ($) <small class="text-muted">auto-calculated</small></label>
-          <input type="number" id="mat-sell" class="input" step="0.01" placeholder="0.00">
-        </div>
-      </div>
-      <div id="mat-preview" class="text-muted" style="font-size:13px;margin-top:4px"></div>
-    `, [
-      { label: 'Cancel', class: 'btn-secondary', onClick: closeModal },
-      { label: 'Add Line', class: 'btn-primary', onClick: () => {
-        const desc  = document.getElementById('mat-desc')?.value || 'Material';
-        const qty   = parseFloat(document.getElementById('mat-qty')?.value || 1);
-        const sell  = parseFloat(document.getElementById('mat-sell')?.value || 0);
-        const total = +(qty * sell).toFixed(2);
-        this.addLine({ description: desc, qty, unit: 'ea', unit_price: sell, total });
-        closeModal();
-      }},
-    ]);
+/* ─── SCOPE ITEMS ─────────────────────────────────────────── */
+.scope-item{border:1px solid var(--border);border-radius:var(--radius);margin-bottom:10px;overflow:hidden;background:var(--bg3)}
+.scope-item-header{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 14px;background:var(--bg4);border-bottom:1px solid var(--border);flex-wrap:wrap;
+}
+.scope-item-title{font-size:13px;font-weight:600}
+.scope-item-controls{display:flex;align-items:center;gap:8px;font-size:12px}
+.scope-lines{padding:10px 14px}
+.scope-lines-text{font-family:var(--font);font-size:12.5px;line-height:1.5;background:var(--bg);min-height:80px}
+.scope-item-view{margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+.scope-item-view:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+.scope-list{margin:8px 0 0 18px}
+.scope-list li{font-size:12.5px;color:var(--text-dim);line-height:1.6;margin-bottom:3px}
 
-    setTimeout(() => {
-      const updateMarkup = () => {
-        const cost = parseFloat(document.getElementById('mat-cost')?.value || 0);
-        const qty  = parseFloat(document.getElementById('mat-qty')?.value || 1);
-        if (cost > 0) {
-          const sell   = applyMarkup(cost);
-          const prev   = document.getElementById('mat-preview');
-          const sellEl = document.getElementById('mat-sell');
-          if (sellEl) sellEl.value = sell;
-          if (prev) prev.textContent = `Cost $${cost} × ${getMarkupMultiplier(cost)} = sell $${sell} | Line total: ${formatCurrency(qty * sell)}`;
-        }
-      };
-      ['mat-cost','mat-qty'].forEach(id =>
-        document.getElementById(id)?.addEventListener('input', updateMarkup)
-      );
-    }, 50);
-  },
+/* ─── TOTALS ──────────────────────────────────────────────── */
+.totals-block{margin-top:16px}
+.totals-grid{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.totals-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:9px 14px;border-bottom:1px solid var(--border);font-size:13px;color:var(--text-dim);
+}
+.totals-row:last-child{border-bottom:none}
+.totals-row-bold{background:var(--orange-glow);font-weight:700;color:var(--text)}
+.totals-row-bold strong{color:var(--orange);font-size:15px}
 
-  addLine(item = null) {
-    this._lines.push(item || { description: '', qty: 1, unit: 'ls', unit_price: 0, total: 0 });
-    this.renderLines();
-  },
+/* ─── SPINNER/STATES ──────────────────────────────────────── */
+.spinner-wrap{display:flex;align-items:center;justify-content:center;gap:10px;padding:40px 20px;color:var(--text-muted);font-size:13px}
+.spinner{width:20px;height:20px;border:2px solid var(--border2);border-top-color:var(--orange);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 24px;color:var(--text-muted);font-size:13px;text-align:center;gap:12px}
+.empty-state::before{content:'—';font-family:var(--font-cond);font-size:28px;font-weight:700;color:var(--border2);letter-spacing:.2em}
+.error-state{padding:16px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:var(--radius);color:var(--red);font-size:13px}
 
-  renderLines() {
-    const wrap = document.getElementById('q-lines-wrap');
-    if (!this._lines.length) { wrap.innerHTML = '<p class="muted">No line items.</p>'; this.renderTotals(); return; }
-    wrap.innerHTML = `<table class="table">
-      <thead><tr><th style="min-width:300px">Description</th><th>Qty</th><th>Unit</th><th>Unit Price</th><th>Total</th><th></th></tr></thead>
-      <tbody>${this._lines.map((l, i) => `<tr>
-        <td><input class="input ql-desc" data-i="${i}" value="${l.description}"></td>
-        <td><input type="number" class="input input-sm ql-qty" data-i="${i}" value="${l.qty}" style="width:60px"></td>
-        <td><input class="input input-sm ql-unit" data-i="${i}" value="${l.unit}" style="width:60px"></td>
-        <td><input type="number" class="input input-sm ql-price" data-i="${i}" value="${l.unit_price}" style="width:90px"></td>
-        <td><strong class="ql-total-${i}">${formatCurrency(l.total)}</strong></td>
-        <td><button class="btn btn-xs btn-danger ql-del" data-i="${i}">✕</button></td>
-      </tr>`).join('')}</tbody>
-    </table>`;
+/* ─── TOAST ───────────────────────────────────────────────── */
+#toast-area{position:fixed;bottom:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{
+  padding:10px 16px;border-radius:var(--radius);font-size:13px;font-weight:500;border:1px solid;
+  box-shadow:var(--shadow-lg);transform:translateX(110%);transition:transform .25s cubic-bezier(.25,.8,.25,1);
+  pointer-events:auto;max-width:340px;
+}
+.toast.toast-show{transform:translateX(0)}
+.toast-success{background:rgba(21,128,61,.9);border-color:var(--green);color:#d1fae5}
+.toast-error{background:rgba(185,28,28,.9);border-color:var(--red);color:#fee2e2}
+.toast-warn{background:rgba(180,83,9,.9);border-color:var(--yellow);color:#fef3c7}
+.toast-info{background:rgba(2,132,199,.9);border-color:var(--blue);color:#e0f2fe}
 
-    const recalc = (i) => {
-      const q = Number(document.querySelector(`.ql-qty[data-i="${i}"]`)?.value) || 0;
-      const p = Number(document.querySelector(`.ql-price[data-i="${i}"]`)?.value) || 0;
-      this._lines[i].total = q * p;
-      const el = document.querySelector(`.ql-total-${i}`);
-      if (el) el.textContent = formatCurrency(this._lines[i].total);
-      this.renderTotals();
-    };
-    wrap.querySelectorAll('.ql-desc').forEach(el => el.oninput  = (e) => { this._lines[e.target.dataset.i].description = e.target.value; });
-    wrap.querySelectorAll('.ql-qty').forEach(el  => el.oninput  = (e) => { this._lines[e.target.dataset.i].qty = Number(e.target.value); recalc(e.target.dataset.i); });
-    wrap.querySelectorAll('.ql-unit').forEach(el => el.oninput  = (e) => { this._lines[e.target.dataset.i].unit = e.target.value; });
-    wrap.querySelectorAll('.ql-price').forEach(el=> el.oninput  = (e) => { this._lines[e.target.dataset.i].unit_price = Number(e.target.value); recalc(e.target.dataset.i); });
-    wrap.querySelectorAll('.ql-del').forEach(btn => btn.onclick = (e) => { this._lines.splice(Number(e.target.dataset.i), 1); this.renderLines(); });
-    this.renderTotals();
-  },
+/* ─── MODAL ───────────────────────────────────────────────── */
+#modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px)}
+#modal-overlay[hidden]{display:none}
+#modal-overlay.open{display:flex}
+.modal-box{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);width:100%;max-width:560px;overflow:hidden;animation:modalIn .2s ease}
+.modal-box.modal-lg{max-width:860px}
+.modal-box.modal-xl{max-width:1100px}
+@keyframes modalIn{from{opacity:0;transform:scale(.96) translateY(-8px)}}
+.modal-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 18px;border-bottom:1px solid var(--border);
+  font-family:var(--font-cond);font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-dim);background:var(--bg3);
+}
+.modal-close{background:transparent;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;padding:0 4px;line-height:1;transition:color .1s}
+.modal-close:hover{color:var(--text)}
+.modal-body{padding:20px 18px;max-height:65vh;overflow-y:auto}
+.modal-footer{padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--bg3)}
 
-  renderTotals() {
-    const sub = this._lines.reduce((s, l) => s + l.total, 0);
-    const tax = sub * CONFIG.TAX_RATE;
-    const total = sub + tax;
-    const el = document.getElementById('q-totals');
-    if (!el) return;
-    el.innerHTML = `<div class="totals-grid" style="max-width:320px">
-      ${tr2('Subtotal', formatCurrency(sub))}
-      ${tr2(`GST (${(CONFIG.TAX_RATE*100).toFixed(0)}%)`, formatCurrency(tax))}
-      ${tr2('TOTAL', formatCurrency(total), true)}
-    </div>`;
-    this._totals = { subtotal: sub, tax_amount: tax, total };
-  },
+/* ─── AUTH ────────────────────────────────────────────────── */
+.auth-overlay{position:fixed;inset:0;background:var(--bg);z-index:2000;display:flex;align-items:center;justify-content:center}
+.auth-overlay.hidden{display:none!important}
+.auth-box{
+  width:100%;max-width:380px;padding:40px 36px;
+  background:var(--bg2);border:1px solid var(--border2);border-radius:var(--radius-lg);
+  box-shadow:var(--shadow-lg);position:relative;
+}
+.auth-box::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--orange) 0%,var(--blue) 100%);
+  border-radius:var(--radius-lg) var(--radius-lg) 0 0;
+}
+.auth-logo{margin-bottom:28px}
+.auth-logo-mark{
+  width:40px;height:40px;background:var(--orange);border-radius:var(--radius);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-cond);font-size:20px;font-weight:700;color:#fff;margin-bottom:10px;
+}
+.auth-logo-name{font-family:var(--font-cond);font-size:18px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--orange)}
+.auth-logo-company{font-size:11px;color:var(--text-muted);margin-top:2px;text-transform:uppercase;letter-spacing:.04em}
+.auth-heading{font-size:15px;font-weight:600;margin-bottom:6px}
+.auth-sub{font-size:12.5px;color:var(--text-dim);margin-bottom:20px;line-height:1.5}
+.auth-msg{margin-top:12px;padding:8px 12px;border-radius:var(--radius);font-size:12.5px}
+.auth-msg.hidden{display:none}
+.auth-error{background:rgba(239,68,68,.1);color:var(--red);border:1px solid rgba(239,68,68,.2)}
+.auth-sent{text-align:center;padding:12px 0}
+.auth-sent-icon{font-size:36px;margin-bottom:12px}
+.auth-sent p{font-size:13px;color:var(--text-dim);margin:6px 0}
+.auth-sent h2{font-size:16px;font-weight:600;margin-bottom:8px}
 
-  async saveQuote() {
-    const bid = document.getElementById('q-building').value;
-    if (!bid)             { notify.warn('Select a building.'); return; }
-    if (!this._lines.length) { notify.warn('Add at least one line item.'); return; }
+/* ─── USER BADGE ──────────────────────────────────────────── */
+.user-badge{display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px 10px;border-radius:var(--radius);border:1px solid var(--border);transition:background .13s}
+.user-badge:hover{background:var(--bg3)}
+.user-initial{
+  width:24px;height:24px;background:var(--orange-glow);border:1px solid var(--orange-dim);
+  border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;color:var(--orange);flex-shrink:0;
+}
+.user-email-short{font-size:12px;color:var(--text-dim)}
+.user-dropdown{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);min-width:200px;overflow:hidden;z-index:500;animation:dropIn .15s ease}
+@keyframes dropIn{from{opacity:0;transform:translateY(-6px)}}
+.user-dropdown-email{padding:10px 14px;font-size:12px;color:var(--text-dim)}
+.user-dropdown-sep{border-color:var(--border);margin:0}
+.user-dropdown-btn{display:block;width:100%;padding:9px 14px;background:transparent;border:none;text-align:left;color:var(--red);font-size:13px;cursor:pointer;transition:background .1s}
+.user-dropdown-btn:hover{background:var(--bg3)}
 
-    const num = 'Q-' + pad(Date.now().toString().slice(-4));
-    const rec = {
-      building_id:   bid,
-      quote_number:  num,
-      title:         document.getElementById('q-title').value,
-      status:        'draft',
-      created_date:  today(),
-      valid_until:   document.getElementById('q-valid').value,
-      follow_up_date: document.getElementById('q-followup').value,
-      payment_terms: document.getElementById('q-pay-terms').value || 'Net 30',
-      line_items:    this._lines,
-      subtotal:      this._totals?.subtotal || 0,
-      tax_rate:      CONFIG.TAX_RATE,
-      tax_amount:    this._totals?.tax_amount || 0,
-      total:         this._totals?.total || 0,
-      notes:         document.getElementById('q-notes').value,
-      internal_notes: document.getElementById('q-int-notes').value,
-    };
+/* ─── TEXT UTILS ──────────────────────────────────────────── */
+.text-danger{color:var(--red)!important}
+.text-warning{color:var(--yellow)!important}
+.text-success{color:var(--green)!important}
+.text-blue{color:var(--blue)!important}
+.text-muted{color:var(--text-muted)!important}
+.muted{color:var(--text-muted);font-size:13px}
+.mono{font-family:var(--font-mono)}
+.truncate{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.card-footer-link{padding:8px 16px 0;font-size:12px}
+.card-footer-link a{color:var(--text-dim)}
+.card-footer-link a:hover{color:var(--orange)}
 
-    try {
-      const saved = await DB.create(rec);
-      notify.success('Quote saved.');
-      navigate(`/quotes/${saved.id}`);
-    } catch (e) {
-      notify.error(e.message);
-    }
-  },
+/* ─── DROP ZONE ───────────────────────────────────────────── */
+.drop-zone{
+  border:2px dashed var(--border2);border-radius:var(--radius-lg);
+  padding:40px 24px;text-align:center;cursor:pointer;
+  transition:border-color .15s,background .15s;background:var(--bg3);
+}
+.drop-zone:hover,.drop-zone.drag-over{border-color:var(--orange);background:var(--orange-glow)}
+.drop-zone-icon{font-size:32px;margin-bottom:12px;display:block}
+.drop-zone-text{font-size:13.5px;font-weight:500;margin-bottom:6px}
+.drop-zone-sub{font-size:12px;color:var(--text-muted)}
 
-  async detail(id, container) {
-    container.innerHTML = spinner('Loading...');
-    try {
-      const q = await DB.getById(id);
-      const b = q.buildings;
-      setPageTitle(`Quote ${q.quote_number}`, [{ label: 'Quotes', href: '#/quotes' }, { label: q.quote_number }]);
-      container.innerHTML = `<div class="page-wrap">
-        <div class="toolbar">
-          ${statusBadge(q.status)}
-          <div class="toolbar-right">
-            <select id="q-status-sel" class="input input-sm" style="max-width:130px">
-              ${CONFIG.QUOTE_STATUSES.map(s => `<option ${s === q.status ? 'selected' : ''}>${s}</option>`).join('')}
-            </select>
-            <button class="btn btn-sm btn-secondary" id="q-update-status">Update Status</button>
-            <button class="btn btn-sm btn-primary" id="q-pdf-btn">Export PDF</button>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-header"><h3>Quote ${q.quote_number}</h3></div>
-          <div class="card-body detail-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
-            <div class="detail-field"><span class="detail-label">Building</span><span>${b?.name || '—'}</span></div>
-            <div class="detail-field"><span class="detail-label">Client</span><span>${b?.client_name || '—'}</span></div>
-            <div class="detail-field"><span class="detail-label">Title</span><span>${q.title || '—'}</span></div>
-            <div class="detail-field"><span class="detail-label">Created</span><span>${formatDate(q.created_date)}</span></div>
-            <div class="detail-field"><span class="detail-label">Valid Until</span><span>${formatDate(q.valid_until)}</span></div>
-            <div class="detail-field"><span class="detail-label">Follow-Up</span><span class="${isOverdue(q.follow_up_date) && q.status === 'sent' ? 'text-danger' : ''}">${formatDate(q.follow_up_date)}</span></div>
-          </div>
-        </div>
-        <div class="card" style="margin-top:1rem">
-          <div class="card-header"><h3>Line Items</h3></div>
-          <div class="card-body">
-            <table class="table">
-              <thead><tr><th>Description</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr></thead>
-              <tbody>${(q.line_items || []).map(l => `<tr>
-                <td>${l.description}</td>
-                <td>${l.qty}</td>
-                <td>${formatCurrency(l.unit_price)}</td>
-                <td>${formatCurrency(l.total)}</td>
-              </tr>`).join('')}</tbody>
-            </table>
-            <div class="totals-grid" style="max-width:300px;margin-top:.75rem">
-              ${tr2('Subtotal', formatCurrency(q.subtotal))}
-              ${tr2(`GST (${((q.tax_rate || CONFIG.TAX_RATE)*100).toFixed(0)}%)`, formatCurrency(q.tax_amount))}
-              ${tr2('TOTAL', formatCurrency(q.total), true)}
-            </div>
-          </div>
-        </div>
-        ${q.notes ? `<div class="card" style="margin-top:1rem"><div class="card-header"><h3>Notes</h3></div><div class="card-body"><p>${q.notes}</p></div></div>` : ''}
-        ${q.internal_notes ? `<div class="card" style="margin-top:1rem;border-left:3px solid var(--warning)"><div class="card-header"><h3>Internal Notes</h3></div><div class="card-body"><p>${q.internal_notes}</p></div></div>` : ''}
-      </div>`;
+/* ─── PROGRESS ────────────────────────────────────────────── */
+.progress-bar{height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin:8px 0}
+.progress-fill{height:100%;background:var(--orange);border-radius:2px;transition:width .3s ease}
 
-      document.getElementById('q-pdf-btn').onclick = () => {
-        if (!window.jspdf) { notify.error('jsPDF not loaded.'); return; }
-        generateQuotePDF(q, b);
-      };
-      document.getElementById('q-update-status').onclick = async () => {
-        const status = document.getElementById('q-status-sel').value;
-        const upd = { status };
-        if (status === 'sent' && !q.sent_date) upd.sent_date = today();
-        try {
-          await DB.update(id, upd);
-          notify.success('Status updated.');
-          navigate(`/quotes/${id}`);
-        } catch (e) { notify.error(e.message); }
-      };
-    } catch (e) {
-      container.innerHTML = `<div class="page-wrap error-state">${e.message}</div>`;
-    }
-  },
+/* ─── EXTRACT CARDS ───────────────────────────────────────── */
+.extract-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-top:14px}
+.extract-card{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.extract-card-type{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--orange)}
+.extract-card-tag{font-family:var(--font-mono);font-size:13px;font-weight:500}
+.extract-card-loc{font-size:12px;color:var(--text-dim)}
 
-  async deleteQuote(id) {
-    const ok = await confirm('Delete this quote?');
-    if (!ok) return;
-    try {
-      await DB.delete(id);
-      notify.success('Quote deleted.');
-      await this.loadTable();
-    } catch (e) {
-      notify.error(e.message);
-    }
-  },
-};
+/* ─── AI BADGE ────────────────────────────────────────────── */
+.ai-badge{
+  display:inline-flex;align-items:center;gap:5px;padding:2px 8px;
+  background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.3);
+  border-radius:2px;font-family:var(--font-cond);font-size:10px;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--purple);
+}
 
-function tr2(l, v, bold = false) {
-  return `<div class="totals-row ${bold ? 'totals-row-bold' : ''}"><span>${l}</span><strong>${v}</strong></div>`;
+/* ─── ALERT ───────────────────────────────────────────────── */
+.alert{padding:10px 14px;border-radius:var(--radius);font-size:13px;border:1px solid;margin-bottom:14px}
+.alert-warning{background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.3);color:var(--yellow)}
+.alert-info{background:rgba(56,189,248,.08);border-color:rgba(56,189,248,.25);color:var(--blue)}
+.alert-success{background:rgba(34,197,94,.08);border-color:rgba(34,197,94,.25);color:var(--green)}
+
+/* ─── SCROLLBARS ──────────────────────────────────────────── */
+*{scrollbar-width:thin;scrollbar-color:var(--border2) transparent}
+*::-webkit-scrollbar{width:5px;height:5px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+/* ─── RESPONSIVE ──────────────────────────────────────────── */
+@media(max-width:768px){
+  #sidebar{width:52px;min-width:52px}
+  .sidebar-logo,.nav-label{display:none}
+  .nav-item{justify-content:center;padding:10px}
 }

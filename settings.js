@@ -1,367 +1,526 @@
-// settings.js — Admin settings: rate sheet, markup matrix, XLSX upload
-// All changes persist to Supabase (markup_matrix + user_settings tables).
+// js/modules/pm-records.js
+import { setPageTitle }    from './app.js';
+import { PMRecords as DB, Buildings, Equipment, Proposals, Deficiencies } from './db.js';
+import { formatDate, statusBadge, today, pad, addMonths } from './helpers.js';
+import { openModal, closeModal, confirm, notify, makeSortable, spinner, emptyState, getFormData } from './ui.js';
+import { navigate }        from './router.js';
 
-import { MarkupMatrix, UserSettings, EquipmentMasterSync } from './db.js';
-import { EQUIPMASTER, EQUIPMASTER_MANUFACTURERS } from './equipmaster.js';
-import { CONFIG }                      from './config.js';
-import { notify }                      from './ui.js';
-import { formatCurrency }              from './helpers.js';
+export const PMRecords = {
 
-export const Settings = {
   async init(container) {
-    container.innerHTML = `
-      <div class="page-header">
-        <h1>Settings</h1>
-        <p class="page-sub">Rate sheet, markup matrix, and company configuration.</p>
+    setPageTitle('Service Records');
+    container.innerHTML = `<div class="page-wrap">
+      <div class="toolbar">
+        <div class="toolbar-right">
+          <button class="btn btn-primary" id="pm-new-btn">+ New Service Record</button>
+        </div>
       </div>
-      <div class="tab-bar mb-16">
-        <button class="tab-btn active" data-tab="rates">Labour Rates</button>
-        <button class="tab-btn" data-tab="markup">Material Markup</button>
-        <button class="tab-btn" data-tab="company">Company Info</button>
-        <button class="tab-btn" data-tab="equipmaster">Equipment Master</button>
-      </div>
-      <div id="settings-content"></div>
-    `;
-
-    container.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        container.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        this._loadTab(btn.dataset.tab);
-      });
-    });
-
-    this._loadTab('rates');
+      <div class="card"><div id="pm-table-wrap">${spinner()}</div></div>
+    </div>`;
+    await this.loadTable();
+    document.getElementById('pm-new-btn').onclick = () => navigate('/pm-records/new');
   },
 
-  _loadTab(tab) {
-    const el = document.getElementById('settings-content');
-    if (tab === 'rates')       this._renderRates(el);
-    if (tab === 'markup')      this._renderMarkup(el);
-    if (tab === 'company')     this._renderCompany(el);
-    if (tab === 'equipmaster') this._renderEquipMaster(el);
-  },
-
-  // ─── Labour Rates ─────────────────────────────────────────────────────────
-  async _renderRates(el) {
-    let saved = null;
-    try { saved = await UserSettings.get('labour_rates'); } catch(e) {}
-    const r = saved || CONFIG.LABOUR_RATES;
-
-    el.innerHTML = `
-      <div class="report-card">
-        <h3>Labour Rate Sheet — from Schedule D (2024)</h3>
-        <p class="text-muted mb-16" style="font-size:13px">
-          These rates are used for deficiency quotes and service call estimates.
-          PM hourly rate drives proposal pricing calculations.
-        </p>
-        <form id="rates-form">
-          <div class="form-row">
-            <div class="form-group">
-              <label>Weekday Callout Fee ($)</label>
-              <input type="number" step="0.01" name="weekday_callout" value="${r.weekday_callout}">
-              <small class="text-muted">Includes 0.5hr + truck fee + fuel surcharge</small>
-            </div>
-            <div class="form-group">
-              <label>Weekday Hourly Rate ($/hr)</label>
-              <input type="number" step="0.01" name="weekday_hourly" value="${r.weekday_hourly}">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Weekend/OT Callout Fee ($)</label>
-              <input type="number" step="0.01" name="weekend_callout" value="${r.weekend_callout}">
-            </div>
-            <div class="form-group">
-              <label>Weekend/OT Hourly Rate ($/hr)</label>
-              <input type="number" step="0.01" name="weekend_hourly" value="${r.weekend_hourly}">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>PM Labour Rate ($/hr)</label>
-              <input type="number" step="0.01" name="pm_hourly" value="${r.pm_hourly}">
-              <small class="text-muted">Used to price PM proposals from standard hours</small>
-            </div>
-            <div class="form-group">
-              <label>Minimum Site Hours</label>
-              <input type="number" step="0.5" name="minimum_hours" value="${r.minimum_hours}">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>PM Overhead % <small>(on labour cost)</small></label>
-              <input type="number" step="1" name="pm_overhead_pct" value="${Math.round((CONFIG.PM_OVERHEAD_PCT ?? 0.30) * 100)}">
-            </div>
-            <div class="form-group">
-              <label>PM Margin % <small>(net, after overhead)</small></label>
-              <input type="number" step="1" name="pm_margin_pct" value="${Math.round((CONFIG.PM_MARGIN_PCT ?? 0.20) * 100)}">
-            </div>
-          </div>
-          <button type="submit" class="btn btn-primary">Save Rates</button>
-        </form>
-      </div>
-    `;
-
-    document.getElementById('rates-form')?.addEventListener('submit', async e => {
-      e.preventDefault();
-      const fd = new FormData(e.target);
-      const rec = {
-        weekday_callout:  parseFloat(fd.get('weekday_callout')),
-        weekday_hourly:   parseFloat(fd.get('weekday_hourly')),
-        weekend_callout:  parseFloat(fd.get('weekend_callout')),
-        weekend_hourly:   parseFloat(fd.get('weekend_hourly')),
-        pm_hourly:        parseFloat(fd.get('pm_hourly')),
-        minimum_hours:    parseFloat(fd.get('minimum_hours')),
-        pm_overhead_pct:  parseFloat(fd.get('pm_overhead_pct')) / 100,
-        pm_margin_pct:    parseFloat(fd.get('pm_margin_pct'))   / 100,
-      };
-      try {
-        await UserSettings.set('labour_rates', rec);
-        // Also update CONFIG at runtime so rest of app picks up immediately
-        Object.assign(CONFIG.LABOUR_RATES, rec);
-        CONFIG.PM_OVERHEAD_PCT = rec.pm_overhead_pct;
-        CONFIG.PM_MARGIN_PCT   = rec.pm_margin_pct;
-        notify('Rates saved', 'success');
-      } catch (err) {
-        notify('Save failed: ' + err.message, 'error');
-      }
-    });
-  },
-
-  // ─── Markup Matrix ─────────────────────────────────────────────────────────
-  async _renderMarkup(el) {
-    el.innerHTML = `<div class="spinner">Loading…</div>`;
-    let rows = [];
-    try { rows = await MarkupMatrix.getAll(); } catch(e) { rows = []; }
-
-    el.innerHTML = `
-      <div class="report-card">
-        <h3>Material Markup Matrix</h3>
-        <p class="text-muted mb-16" style="font-size:13px">
-          Sell price = cost × multiplier. Applied automatically when pricing deficiency quotes.
-          Loaded from Material_Markup_Matrix.xlsx on initial setup.
-        </p>
-        <table class="data-table" id="markup-table">
-          <thead>
-            <tr>
-              <th>Cost Range</th>
-              <th class="text-right">Multiplier</th>
-              <th class="text-right">Example: $50 cost → sell</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows.map(r => `
-              <tr data-id="${r.id}">
-                <td>${r.label || (r.cost_to ? `$${r.cost_from} – $${r.cost_to}` : `$${r.cost_from}+`)}</td>
-                <td class="text-right">
-                  <input type="number" step="0.01" class="markup-mult-input"
-                    value="${r.multiplier}" data-id="${r.id}" style="max-width:80px;text-align:right">
-                </td>
-                <td class="text-right text-muted markup-example" data-id="${r.id}">
-                  ${formatCurrency(50 * r.multiplier)}
-                </td>
-                <td class="action-cell">
-                  <button class="btn btn-sm btn-primary markup-save-btn" data-id="${r.id}">Save</button>
-                </td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-
-        <div class="form-section-title mt-16">Upload Markup Matrix from XLSX</div>
-        <p class="text-muted mb-8" style="font-size:13px">
-          Upload a spreadsheet with columns: <code>cost_from</code>, <code>cost_to</code>, <code>multiplier</code>, <code>label</code>
-          — or in the same format as Material_Markup_Matrix.xlsx.
-        </p>
-        <label class="btn btn-secondary">
-          Import XLSX
-          <input type="file" id="markup-xlsx-input" accept=".xlsx,.csv" style="display:none">
-        </label>
-        <span id="markup-upload-status" class="text-muted" style="margin-left:12px;font-size:13px"></span>
-      </div>
-    `;
-
-    // Live multiplier preview
-    el.querySelectorAll('.markup-mult-input').forEach(input => {
-      input.addEventListener('input', () => {
-        const id   = input.dataset.id;
-        const val  = parseFloat(input.value) || 0;
-        const ex   = el.querySelector(`.markup-example[data-id="${id}"]`);
-        if (ex) ex.textContent = formatCurrency(50 * val);
-      });
-    });
-
-    // Save individual rows
-    el.querySelectorAll('.markup-save-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const id    = btn.dataset.id;
-        const input = el.querySelector(`.markup-mult-input[data-id="${id}"]`);
-        const mult  = parseFloat(input?.value);
-        if (!mult || isNaN(mult)) return;
-        try {
-          await MarkupMatrix.update(id, { multiplier: mult });
-          notify('Multiplier saved', 'success');
-        } catch (err) {
-          notify('Save failed: ' + err.message, 'error');
-        }
-      });
-    });
-
-    // XLSX upload
-    document.getElementById('markup-xlsx-input')?.addEventListener('change', async e => {
-      const file = e.target.files[0];
-      if (!file) return;
-      await this._importMarkupXLSX(file, el);
-    });
-  },
-
-  async _importMarkupXLSX(file, el) {
-    const status = document.getElementById('markup-upload-status');
-    if (status) status.textContent = 'Parsing…';
-
+  async loadTable() {
+    const wrap = document.getElementById('pm-table-wrap');
     try {
-      if (typeof XLSX === 'undefined') throw new Error('SheetJS not loaded');
-
-      const buf  = await file.arrayBuffer();
-      const wb   = XLSX.read(buf, { type: 'array' });
-      const ws   = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-
-      // Detect Material_Markup_Matrix.xlsx format (col A = range string, col B = multiplier)
-      // vs column-header format
-      const isMECFormat = rows.some(r => {
-        const keys = Object.keys(r);
-        return keys.length === 2 && keys.some(k => k.toLowerCase().includes('material'));
-      });
-
-      let parsed = [];
-      if (isMECFormat) {
-        // Original MEC format: "Material Cost" | "Multiplication Factor"
-        let sortOrder = 1;
-        for (const r of rows) {
-          const vals = Object.values(r);
-          const label = String(vals[0]).trim();
-          const mult  = parseFloat(vals[1]);
-          if (!mult || isNaN(mult) || !label.includes('$')) continue;
-
-          // Parse range from label like "$5.00-$19.99" or "$3000.00 and up"
-          const nums = label.match(/[\d,]+\.?\d*/g);
-          const from = nums ? parseFloat(nums[0].replace(',','')) : null;
-          const to   = nums && nums.length > 1 ? parseFloat(nums[1].replace(',','')) : null;
-          if (!from) continue;
-
-          parsed.push({ cost_from: from, cost_to: to, multiplier: mult, label, sort_order: sortOrder++ });
-        }
-      } else {
-        // Standard column format
-        for (const r of rows) {
-          const from = parseFloat(r.cost_from ?? r['Cost From'] ?? r['from']);
-          const to   = r.cost_to !== '' ? parseFloat(r.cost_to ?? r['Cost To'] ?? r['to']) : null;
-          const mult = parseFloat(r.multiplier ?? r['Multiplier'] ?? r['Factor']);
-          const label = r.label ?? r['Label'] ?? '';
-          if (isNaN(from) || isNaN(mult)) continue;
-          parsed.push({ cost_from: from, cost_to: isNaN(to) ? null : to, multiplier: mult, label });
-        }
-      }
-
-      if (parsed.length === 0) throw new Error('No valid rows found. Check column format.');
-
-      // Clear existing and insert new
-      const existing = await MarkupMatrix.getAll();
-      for (const row of parsed) {
-        // Find matching row by cost_from and update
-        const match = existing.find(e => e.cost_from === row.cost_from);
-        if (match) {
-          await MarkupMatrix.update(match.id, { multiplier: row.multiplier, label: row.label });
-        }
-      }
-
-      if (status) status.textContent = `Imported ${parsed.length} tiers.`;
-      notify(`Markup matrix updated from ${file.name}`, 'success');
-      await this._renderMarkup(el.closest('#settings-content') || el);
-    } catch (err) {
-      if (status) status.textContent = 'Import failed: ' + err.message;
-      notify('Import failed: ' + err.message, 'error');
+      const rows = await DB.getAll();
+      if (!rows.length) { wrap.innerHTML = emptyState('No service records yet.'); return; }
+      wrap.innerHTML = `<table class="table" id="pm-table">
+        <thead><tr>
+          <th>#</th><th>Date</th><th>Building</th><th>Technician</th>
+          <th>Type</th><th>Status</th><th>Deficiencies</th><th></th>
+        </tr></thead>
+        <tbody>${rows.map(r => {
+          const defs = (r.deficiencies || []).length;
+          return `<tr>
+            <td><a href="#/pm-records/${r.id}" class="link-strong">${r.record_number || '—'}</a></td>
+            <td>${formatDate(r.service_date)}</td>
+            <td>${r.buildings?.name || '—'}</td>
+            <td>${r.technician || '—'}</td>
+            <td>${r.service_type || 'pm'}</td>
+            <td>${statusBadge(r.status)}</td>
+            <td>${defs > 0 ? `<span class="badge badge-warning">${defs} found</span>` : '—'}</td>
+            <td class="actions">
+              <a href="#/pm-records/${r.id}" class="btn btn-xs btn-secondary">View</a>
+              <button class="btn btn-xs btn-danger" data-delete="${r.id}">Delete</button>
+            </td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>`;
+      makeSortable(document.getElementById('pm-table'));
+      wrap.querySelectorAll('[data-delete]').forEach(b => b.onclick = () => this.deleteRecord(b.dataset.delete));
+    } catch (e) {
+      wrap.innerHTML = `<div class="error-state">${e.message}</div>`;
     }
   },
 
-  // ─── Equipment Master ─────────────────────────────────────────────────────────
-  async _renderEquipMaster(el) {
-    const cats = [...new Set(EQUIPMASTER.map(e => e.category))].sort();
-    el.innerHTML = `
-      <div class="report-card">
-        <h3>Equipment Master Dataset</h3>
-        <p class="text-muted mb-16" style="font-size:13px">
-          ${EQUIPMASTER.length} types · ${EQUIPMASTER_MANUFACTURERS.length} manufacturers · ${cats.length} categories.
-          Drives all dropdowns, auto-fill, and proposal calculations.
-        </p>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
-          <button class="btn btn-secondary" id="em-seed-btn">↑ Seed Manufacturers to DB</button>
-          <span id="em-seed-status" class="text-muted" style="line-height:2.2"></span>
-        </div>
-        <div class="table-scroll">
-          <table class="data-table">
-            <thead><tr>
-              <th>Category</th><th>Equipment Type</th><th>Tag</th>
-              <th class="text-right">Qtly Hrs</th><th class="text-right">Ann Hrs</th>
-              <th>Belt</th><th>Filter</th><th>Lubricant</th>
-            </tr></thead>
-            <tbody>
-              ${EQUIPMASTER.map(e => `<tr>
-                <td><span class="badge badge-muted">${e.category||'—'}</span></td>
-                <td>${e.equipment_type}</td>
-                <td class="text-muted">${e.tag_prefix||'—'}</td>
-                <td class="text-right">${e.quarterly_hours != null ? e.quarterly_hours : '—'}</td>
-                <td class="text-right">${e.annual_hours    != null ? e.annual_hours    : '—'}</td>
-                <td class="text-muted">${e.belt_size  ||'—'}</td>
-                <td class="text-muted">${e.filter_type||'—'}</td>
-                <td class="text-muted">${e.lubricant_type||'—'}</td>
-              </tr>`).join('')}
-            </tbody>
-          </table>
+  async create(container) {
+    setPageTitle('New Service Record', [{ label: 'Service Records', href: '#/pm-records' }, { label: 'New' }]);
+    let buildings = [], proposals = [];
+    try { [buildings, proposals] = await Promise.all([Buildings.getAll(), Proposals.getAll()]); } catch {}
+
+    container.innerHTML = `<div class="page-wrap">
+      <div class="card">
+        <div class="card-header"><h3>Service Record</h3></div>
+        <div class="card-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Building *</label>
+              <select id="pm-building" class="input">
+                <option value="">— Select —</option>
+                ${buildings.map(b => `<option value="${b.id}">${b.name}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Service Date *</label>
+              <input type="date" id="pm-date" class="input" value="${today()}">
+            </div>
+            <div class="form-group">
+              <label>Technician</label>
+              <input id="pm-tech" class="input">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Service Type</label>
+              <select id="pm-type" class="input">
+                <option value="pm">Preventive Maintenance</option>
+                <option value="service-call">Service Call</option>
+                <option value="inspection">Inspection</option>
+                <option value="commissioning">Commissioning</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Associated Proposal</label>
+              <select id="pm-proposal" class="input">
+                <option value="">None</option>
+                ${proposals.map(p => `<option value="${p.id}">${p.proposal_number} — ${p.buildings?.name || ''}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Total Hours</label>
+              <input type="number" id="pm-hours" class="input" step="0.25" placeholder="0.00">
+            </div>
+          </div>
         </div>
       </div>
-    `;
 
-    document.getElementById('em-seed-btn')?.addEventListener('click', async () => {
-      const btn    = document.getElementById('em-seed-btn');
-      const status = document.getElementById('em-seed-status');
-      btn.disabled = true; btn.textContent = 'Seeding…';
-      try {
-        const count = await EquipmentMasterSync.seedManufacturers(EQUIPMASTER_MANUFACTURERS);
-        status.textContent = `✓ ${count} manufacturers seeded.`;
-      } catch (err) {
-        status.textContent = 'Failed: ' + err.message;
-      } finally {
-        btn.disabled = false; btn.textContent = '↑ Seed Manufacturers to DB';
-      }
-    });
+      <div class="card" style="margin-top:1rem" id="pm-equip-section">
+        <div class="card-header">
+          <h3>Equipment Serviced</h3>
+          <button class="btn btn-sm btn-secondary" id="pm-add-equip">+ Add Equipment</button>
+        </div>
+        <div class="card-body" id="pm-equip-list">
+          <p class="muted">Select a building first, then add equipment serviced.</p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:1rem">
+        <div class="card-header">
+          <h3>Deficiencies Found</h3>
+          <button class="btn btn-sm btn-secondary" id="pm-add-def">+ Add Deficiency</button>
+        </div>
+        <div class="card-body" id="pm-def-list">
+          <p class="muted">No deficiencies recorded.</p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:1rem">
+        <div class="card-header">
+          <h3>Parts & Materials Used</h3>
+          <button class="btn btn-sm btn-secondary" id="pm-add-part">+ Add Part</button>
+        </div>
+        <div class="card-body" id="pm-parts-list">
+          <p class="muted">No parts recorded.</p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:1rem">
+        <div class="card-header"><h3>General Notes</h3></div>
+        <div class="card-body">
+          <textarea id="pm-notes" class="input" rows="4" placeholder="General site notes, access issues, follow-up required…"></textarea>
+        </div>
+      </div>
+
+      <div class="toolbar" style="margin-top:1rem">
+        <button class="btn btn-secondary" onclick="history.back()">Cancel</button>
+        <button class="btn btn-primary" id="pm-save-btn">Save Record</button>
+      </div>
+    </div>`;
+
+    this._equipServiced = [];
+    this._deficiencies  = [];
+    this._parts         = [];
+    this._equipCache    = [];
+
+    document.getElementById('pm-building').onchange = (e) => this.loadBuildingEquipment(e.target.value);
+    document.getElementById('pm-add-equip').onclick  = () => this.pickEquipment();
+    document.getElementById('pm-add-def').onclick    = () => this.addDeficiency();
+    document.getElementById('pm-add-part').onclick   = () => this.addPart();
+    document.getElementById('pm-save-btn').onclick   = () => this.saveRecord();
   },
 
-  // ─── Company Info ──────────────────────────────────────────────────────────
-  async _renderCompany(el) {
-    const c = CONFIG.COMPANY;
-    el.innerHTML = `
-      <div class="report-card">
-        <h3>Company Information</h3>
-        <p class="text-muted mb-16" style="font-size:13px">
-          Displayed on all PDF exports. Update <code>js/config.js</code> COMPANY block directly,
-          then redeploy to Cloudflare Pages.
-        </p>
-        <div class="detail-grid">
-          <div class="detail-field"><label>Company Name</label><div class="field-value">${c.name}</div></div>
-          <div class="detail-field"><label>Address</label><div class="field-value">${c.address}, ${c.city}, ${c.province} ${c.postal}</div></div>
-          <div class="detail-field"><label>Phone</label><div class="field-value">${c.phone}</div></div>
-          <div class="detail-field"><label>Email</label><div class="field-value">${c.email}</div></div>
-          <div class="detail-field"><label>Website</label><div class="field-value">${c.website}</div></div>
-          <div class="detail-field"><label>GST Number</label><div class="field-value">${c.gst}</div></div>
+  async loadBuildingEquipment(bid) {
+    if (!bid) return;
+    try {
+      this._equipCache = await Equipment.getByBuilding(bid);
+    } catch {}
+  },
+
+  pickEquipment() {
+    const cache = this._equipCache;
+    if (!cache.length) { notify.warn('Select a building first — no equipment loaded.'); return; }
+    // Search/filter support
+    let filtered = cache;
+    openModal({
+      title: 'Select Equipment Serviced',
+      size: 'lg',
+      body: `
+        <div style="margin-bottom:10px;display:flex;gap:8px">
+          <input type="search" id="equip-pick-search" class="input input-sm" placeholder="Filter by tag, type, location, make…" style="flex:1">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;text-transform:none;letter-spacing:0;cursor:pointer;color:var(--text-dim)">
+            <input type="checkbox" id="equip-pick-all"> Select All
+          </label>
         </div>
-        <p class="text-muted mt-16" style="font-size:12px">
-          To edit company details: open <code>js/config.js</code>, update the COMPANY block, commit to GitHub, Cloudflare will redeploy automatically.
-        </p>
-      </div>
-    `;
+        <div id="equip-pick-list" style="max-height:400px;overflow-y:auto">
+          ${cache.map(e => {
+            const mm = [e.manufacturer||e.make, e.model].filter(Boolean).join(' ');
+            return `<label class="check-row" style="display:flex;align-items:flex-start;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border);cursor:pointer">
+              <input type="checkbox" class="equip-pick-chk" value="${e.id}"
+                data-tag="${e.tag||''}" data-type="${e.equipment_type}"
+                data-make="${e.manufacturer||e.make||''}" data-model="${e.model||''}"
+                data-loc="${e.location||''}" data-area="${e.service_area||''}"
+                style="margin-top:2px;flex-shrink:0">
+              <span>
+                <strong style="font-family:var(--font-mono);font-size:12px">${e.tag||'—'}</strong>
+                <span style="font-size:13px;margin-left:6px">${e.equipment_type}</span>
+                ${mm ? `<span style="font-size:11.5px;color:var(--text-dim);margin-left:6px">${mm}</span>` : ''}
+                <br>
+                <span style="font-size:11.5px;color:var(--text-muted)">${[e.location, e.service_area ? ({common_strata:'Common Strata',commercial:'Commercial',residential_in_suite:'In-Suite'}[e.service_area]||e.service_area) : ''].filter(Boolean).join(' · ')}</span>
+              </span>
+            </label>`;
+          }).join('')}
+        </div>`,
+      footer: `<button class="btn btn-secondary" id="equip-pick-cancel">Cancel</button>
+               <button class="btn btn-primary" id="equip-pick-ok">Add Selected</button>`,
+    });
+
+    document.getElementById('equip-pick-cancel').onclick = closeModal;
+
+    // Search filter
+    document.getElementById('equip-pick-search').oninput = e => {
+      const q = e.target.value.toLowerCase();
+      document.querySelectorAll('#equip-pick-list .check-row').forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    };
+
+    // Select all
+    document.getElementById('equip-pick-all').onchange = e => {
+      document.querySelectorAll('.equip-pick-chk').forEach(chk => {
+        if (chk.closest('.check-row').style.display !== 'none') chk.checked = e.target.checked;
+      });
+    };
+
+    document.getElementById('equip-pick-ok').onclick = () => {
+      document.querySelectorAll('.equip-pick-chk:checked').forEach(chk => {
+        if (!this._equipServiced.find(e => e.equipment_id === chk.value)) {
+          this._equipServiced.push({
+            equipment_id: chk.value,
+            tag: chk.dataset.tag,
+            type: chk.dataset.type,
+            make: chk.dataset.make,
+            model: chk.dataset.model,
+            location: chk.dataset.loc,
+            service_area: chk.dataset.area,
+            work_performed: '', hours: 0
+          });
+        }
+      });
+      closeModal();
+      this.renderEquipList();
+    };
+  },
+
+  renderEquipList() {
+    const el = document.getElementById('pm-equip-list');
+    if (!this._equipServiced.length) { el.innerHTML = '<p class="muted">None selected.</p>'; return; }
+    el.innerHTML = this._equipServiced.map((e, i) => `
+      <div class="service-item">
+        <div class="service-item-header">
+          <div>
+            <strong style="font-family:var(--font-mono)">${e.tag || '—'}</strong>
+            <span style="margin-left:6px">${e.type}</span>
+            ${(e.make||e.model) ? `<span style="font-size:11.5px;color:var(--text-dim);margin-left:6px">${[e.make,e.model].filter(Boolean).join(' ')}</span>` : ''}
+          </div>
+          <button class="btn btn-xs btn-danger" onclick="PMR.removeEquip(${i})">✕</button>
+        </div>
+        <div class="form-row" style="margin-top:.5rem">
+          <div class="form-group" style="flex:3">
+            <label>Work Performed</label>
+            <textarea class="input eq-work" data-idx="${i}" rows="2">${e.work_performed}</textarea>
+          </div>
+          <div class="form-group" style="flex:1">
+            <label>Hours</label>
+            <input type="number" class="input eq-hrs" data-idx="${i}" value="${e.hours}" step="0.25">
+          </div>
+        </div>
+      </div>`).join('');
+
+    el.querySelectorAll('.eq-work').forEach(ta => {
+      ta.oninput = (e) => { this._equipServiced[e.target.dataset.idx].work_performed = e.target.value; };
+    });
+    el.querySelectorAll('.eq-hrs').forEach(inp => {
+      inp.oninput = (e) => { this._equipServiced[e.target.dataset.idx].hours = Number(e.target.value); };
+    });
+    window.PMR = { removeEquip: (i) => { this._equipServiced.splice(i, 1); this.renderEquipList(); } };
+  },
+
+  addDeficiency() {
+    const equipOpts = this._equipCache.map(e => `<option value="${e.id}">${e.tag || '—'} ${e.equipment_type}</option>`).join('');
+    openModal({
+      title: 'Add Deficiency',
+      body: `<div class="form-grid">
+        <div class="form-group full-width">
+          <label>Description *</label>
+          <textarea id="def-desc" class="input" rows="3" required></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Priority</label>
+            <select id="def-pri" class="input">
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium" selected>Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Equipment</label>
+            <select id="def-equip" class="input">
+              <option value="">— None —</option>
+              ${equipOpts}
+            </select>
+          </div>
+        </div>
+        <div class="form-group full-width">
+          <label>Estimated Cost</label>
+          <input type="number" id="def-cost" class="input" placeholder="0.00">
+        </div>
+      </div>`,
+      footer: `<button class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
+               <button class="btn btn-primary" id="def-add-ok">Add</button>`,
+    });
+    window.closeModal = closeModal;
+    document.getElementById('def-add-ok').onclick = () => {
+      const desc = document.getElementById('def-desc').value.trim();
+      if (!desc) { notify.warn('Description required.'); return; }
+      this._deficiencies.push({
+        description: desc,
+        priority: document.getElementById('def-pri').value,
+        equipment_id: document.getElementById('def-equip').value || null,
+        estimated_cost: Number(document.getElementById('def-cost').value) || 0,
+        status: 'open',
+      });
+      closeModal();
+      this.renderDefList();
+    };
+  },
+
+  renderDefList() {
+    const el = document.getElementById('pm-def-list');
+    if (!this._deficiencies.length) { el.innerHTML = '<p class="muted">No deficiencies recorded.</p>'; return; }
+    el.innerHTML = `<table class="table table-compact">
+      <thead><tr><th>Priority</th><th>Description</th><th>Est. Cost</th><th></th></tr></thead>
+      <tbody>${this._deficiencies.map((d, i) => `<tr>
+        <td>${statusBadge(d.priority)}</td>
+        <td>${d.description}</td>
+        <td>${d.estimated_cost > 0 ? '$' + d.estimated_cost.toFixed(2) : '—'}</td>
+        <td><button class="btn btn-xs btn-danger" onclick="PMR.removeDef(${i})">✕</button></td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+    window.PMR = window.PMR || {};
+    window.PMR.removeDef = (i) => { this._deficiencies.splice(i, 1); this.renderDefList(); };
+  },
+
+  addPart() {
+    openModal({
+      title: 'Add Part / Material',
+      body: `<div class="form-grid">
+        <div class="form-group full-width">
+          <label>Part Description *</label>
+          <input id="part-desc" class="input" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Quantity</label><input type="number" id="part-qty" class="input" value="1"></div>
+          <div class="form-group"><label>Unit Cost ($)</label><input type="number" id="part-cost" class="input" placeholder="0.00"></div>
+        </div>
+      </div>`,
+      footer: `<button class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
+               <button class="btn btn-primary" id="part-add-ok">Add</button>`,
+    });
+    window.closeModal = closeModal;
+    document.getElementById('part-add-ok').onclick = () => {
+      const desc = document.getElementById('part-desc').value.trim();
+      if (!desc) { notify.warn('Description required.'); return; }
+      this._parts.push({
+        part: desc,
+        quantity: Number(document.getElementById('part-qty').value) || 1,
+        cost: Number(document.getElementById('part-cost').value) || 0,
+      });
+      closeModal();
+      this.renderPartsList();
+    };
+  },
+
+  renderPartsList() {
+    const el = document.getElementById('pm-parts-list');
+    if (!this._parts.length) { el.innerHTML = '<p class="muted">No parts recorded.</p>'; return; }
+    el.innerHTML = `<table class="table table-compact">
+      <thead><tr><th>Description</th><th>Qty</th><th>Unit Cost</th><th>Total</th><th></th></tr></thead>
+      <tbody>${this._parts.map((p, i) => `<tr>
+        <td>${p.part}</td><td>${p.quantity}</td>
+        <td>$${p.cost.toFixed(2)}</td>
+        <td>$${(p.quantity * p.cost).toFixed(2)}</td>
+        <td><button class="btn btn-xs btn-danger" onclick="PMR.removePart(${i})">✕</button></td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+    window.PMR = window.PMR || {};
+    window.PMR.removePart = (i) => { this._parts.splice(i, 1); this.renderPartsList(); };
+  },
+
+  async saveRecord() {
+    const bid  = document.getElementById('pm-building').value;
+    const date = document.getElementById('pm-date').value;
+    if (!bid || !date) { notify.warn('Building and service date are required.'); return; }
+
+    const rec = {
+      building_id:       bid,
+      proposal_id:       document.getElementById('pm-proposal').value || null,
+      record_number:     'SR-' + pad(Date.now().toString().slice(-4)),
+      service_date:      date,
+      technician:        document.getElementById('pm-tech').value,
+      service_type:      document.getElementById('pm-type').value,
+      equipment_serviced: this._equipServiced,
+      deficiencies:      this._deficiencies,
+      parts_used:        this._parts,
+      total_hours:       Number(document.getElementById('pm-hours').value) || 0,
+      notes:             document.getElementById('pm-notes').value,
+      status:            'complete',
+    };
+
+    try {
+      // Save PM record
+      const saved = await DB.create(rec);
+
+      // Save deficiencies as standalone records
+      if (this._deficiencies.length) {
+        await Promise.all(this._deficiencies.map(d =>
+          Deficiencies.create({ ...d, building_id: bid, pm_record_id: saved.id })
+        ));
+      }
+
+      // Update next service date on serviced equipment
+      for (const eq of this._equipServiced) {
+        if (eq.equipment_id) {
+          try {
+            const equip = await Equipment.getById(eq.equipment_id);
+            const interval = equip.service_interval_months || 12;
+            await Equipment.update(eq.equipment_id, {
+              last_service_date: date,
+              next_service_date: addMonths(date, interval),
+            });
+          } catch {}
+        }
+      }
+
+      notify.success('Service record saved.');
+      navigate(`/pm-records/${saved.id}`);
+    } catch (e) {
+      notify.error(e.message);
+    }
+  },
+
+  async detail(id, container) {
+    container.innerHTML = spinner('Loading...');
+    try {
+      const r = await DB.getById(id);
+      setPageTitle(`Record ${r.record_number || id}`, [
+        { label: 'Service Records', href: '#/pm-records' },
+        { label: r.record_number || 'Detail' },
+      ]);
+      const equip = r.equipment_serviced || [];
+      const defs  = r.deficiencies || [];
+      const parts = r.parts_used || [];
+
+      container.innerHTML = `<div class="page-wrap">
+        <div class="card">
+          <div class="card-header"><h3>Record ${r.record_number}</h3></div>
+          <div class="card-body detail-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+            <div class="detail-field"><span class="detail-label">Building</span><span>${r.buildings?.name || '—'}</span></div>
+            <div class="detail-field"><span class="detail-label">Service Date</span><span>${formatDate(r.service_date)}</span></div>
+            <div class="detail-field"><span class="detail-label">Technician</span><span>${r.technician || '—'}</span></div>
+            <div class="detail-field"><span class="detail-label">Type</span><span>${r.service_type || '—'}</span></div>
+            <div class="detail-field"><span class="detail-label">Total Hours</span><span>${r.total_hours || '—'}</span></div>
+            <div class="detail-field"><span class="detail-label">Status</span><span>${statusBadge(r.status)}</span></div>
+          </div>
+        </div>
+
+        ${equip.length ? `<div class="card" style="margin-top:1rem">
+          <div class="card-header"><h3>Equipment Serviced</h3></div>
+          <div class="card-body">
+            ${equip.map(e => `<div class="service-item-view">
+              <strong>${e.tag || '—'} — ${e.type}</strong> &nbsp;(${e.hours || 0} hrs)
+              <p style="margin:.25rem 0 0">${e.work_performed || '<span class="muted">No notes.</span>'}</p>
+            </div>`).join('')}
+          </div>
+        </div>` : ''}
+
+        ${defs.length ? `<div class="card" style="margin-top:1rem">
+          <div class="card-header"><h3>Deficiencies Found (${defs.length})</h3></div>
+          <div class="card-body">
+            <table class="table table-compact">
+              <thead><tr><th>Priority</th><th>Description</th><th>Est. Cost</th></tr></thead>
+              <tbody>${defs.map(d => `<tr>
+                <td>${statusBadge(d.priority)}</td>
+                <td>${d.description}</td>
+                <td>${d.estimated_cost > 0 ? '$' + Number(d.estimated_cost).toFixed(2) : '—'}</td>
+              </tr>`).join('')}</tbody>
+            </table>
+          </div>
+        </div>` : ''}
+
+        ${parts.length ? `<div class="card" style="margin-top:1rem">
+          <div class="card-header"><h3>Parts Used</h3></div>
+          <div class="card-body">
+            <table class="table table-compact">
+              <thead><tr><th>Part</th><th>Qty</th><th>Unit</th><th>Total</th></tr></thead>
+              <tbody>${parts.map(p => `<tr>
+                <td>${p.part}</td><td>${p.quantity}</td>
+                <td>$${Number(p.cost).toFixed(2)}</td>
+                <td>$${(p.quantity * p.cost).toFixed(2)}</td>
+              </tr>`).join('')}</tbody>
+            </table>
+          </div>
+        </div>` : ''}
+
+        ${r.notes ? `<div class="card" style="margin-top:1rem"><div class="card-header"><h3>Notes</h3></div><div class="card-body"><p>${r.notes}</p></div></div>` : ''}
+      </div>`;
+    } catch (e) {
+      container.innerHTML = `<div class="page-wrap error-state">${e.message}</div>`;
+    }
+  },
+
+  async deleteRecord(id) {
+    const ok = await confirm('Delete this service record?');
+    if (!ok) return;
+    try {
+      await DB.delete(id);
+      notify.success('Deleted.');
+      await this.loadTable();
+    } catch (e) {
+      notify.error(e.message);
+    }
   },
 };

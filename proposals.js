@@ -1,433 +1,476 @@
-// js/modules/proposals.js
-import { setPageTitle }    from './app.js';
-import { Proposals as DB, Buildings, Equipment, PricingMatrix, MaintenanceItems } from './db.js';
-import { CONFIG, calcPMSellPrice } from './config.js';
-import { getScopeText }    from './scope-library.js';
-import { generateProposalPDF } from './pdf-export.js';
-import { formatCurrency, formatDate, statusBadge, today, addDays, pad } from './helpers.js';
+// js/modules/quotes.js
+import { setPageTitle }   from './app.js';
+import { Quotes as DB, Buildings, Deficiencies, MarkupMatrix } from './db.js';
+import { CONFIG, applyMarkup, getMarkupMultiplier } from './config.js';
+import { generateQuotePDF } from './pdf-export.js';
+import { formatCurrency, formatDate, statusBadge, today, addDays, pad, isOverdue } from './helpers.js';
 import { openModal, closeModal, confirm, notify, makeSortable, spinner, emptyState } from './ui.js';
-import { navigate }        from './router.js';
-import { getStdHours }     from './equipmaster.js';
-import { ProposalWizard }  from './proposal-wizard.js';
+import { navigate }       from './router.js';
 
-export const Proposals = {
+export const Quotes = {
 
   async init(container) {
-    setPageTitle('PM Proposals');
+    setPageTitle('Quote Funnel');
     container.innerHTML = `<div class="page-wrap">
       <div class="toolbar">
+        <select id="q-filter-status" class="input" style="max-width:180px">
+          <option value="">All Status</option>
+          ${CONFIG.QUOTE_STATUSES.map(s => `<option>${s}</option>`).join('')}
+        </select>
         <div class="toolbar-right">
-          <button class="btn btn-primary" id="prop-new-btn">+ New Proposal</button>
+          <button class="btn btn-primary" id="q-new-btn">+ New Quote</button>
         </div>
       </div>
-      <div class="card"><div id="prop-table-wrap">${spinner()}</div></div>
+      <div id="q-pipeline-banner"></div>
+      <div class="card"><div id="q-table-wrap">${spinner()}</div></div>
     </div>`;
     await this.loadTable();
-    document.getElementById('prop-new-btn').onclick = () => navigate('/proposals/new');
+    document.getElementById('q-new-btn').onclick = () => navigate('/quotes/new');
+    document.getElementById('q-filter-status').onchange = (e) => this.filterByStatus(e.target.value);
+  },
+
+  filterByStatus(status) {
+    const tbl = document.querySelector('#q-table-wrap table');
+    if (!tbl) return;
+    tbl.querySelectorAll('tbody tr').forEach(tr => {
+      tr.hidden = status ? !tr.dataset.status?.includes(status) : false;
+    });
   },
 
   async loadTable() {
-    const wrap = document.getElementById('prop-table-wrap');
+    const wrap = document.getElementById('q-table-wrap');
     try {
       const rows = await DB.getAll();
-      if (!rows.length) { wrap.innerHTML = emptyState('No proposals yet.'); return; }
-      wrap.innerHTML = `<table class="table" id="prop-table">
+      if (!rows.length) { wrap.innerHTML = emptyState('No quotes yet.'); return; }
+
+      // Pipeline summary — track all active statuses
+      const openStatuses   = ['draft','sent','pending-approval'];
+      const pipelineRows   = rows.filter(q => openStatuses.includes(q.status));
+      const pipelineVal    = pipelineRows.reduce((s, q) => s + Number(q.total || 0), 0);
+      const pendingAppr    = rows.filter(q => q.status === 'pending-approval');
+      const approved       = rows.filter(q => q.status === 'approved');
+      const deferred       = rows.filter(q => q.status === 'deferred');
+      const followupDue    = rows.filter(q => q.status === 'sent' && q.follow_up_date && isOverdue(q.follow_up_date));
+      const banner = document.getElementById('q-pipeline-banner');
+      if (banner) {
+        banner.innerHTML = `<div class="pipeline-banner">
+          <div class="pipeline-stat">
+            <span class="pipeline-val">${formatCurrency(pipelineVal)}</span>
+            <span class="pipeline-label">Open Pipeline</span>
+          </div>
+          <div class="pipeline-stat">
+            <span class="pipeline-val">${pipelineRows.length}</span>
+            <span class="pipeline-label">Open Quotes</span>
+          </div>
+          <div class="pipeline-stat ${pendingAppr.length ? 'pipeline-warn' : ''}">
+            <span class="pipeline-val">${pendingAppr.length}</span>
+            <span class="pipeline-label">Pending Approval</span>
+          </div>
+          <div class="pipeline-stat pipeline-success">
+            <span class="pipeline-val">${approved.length}</span>
+            <span class="pipeline-label">Approved</span>
+          </div>
+          <div class="pipeline-stat ${deferred.length ? 'pipeline-muted' : ''}">
+            <span class="pipeline-val">${deferred.length}</span>
+            <span class="pipeline-label">Deferred</span>
+          </div>
+          <div class="pipeline-stat ${followupDue.length ? 'pipeline-alert' : ''}">
+            <span class="pipeline-val">${followupDue.length}</span>
+            <span class="pipeline-label">Follow-Ups Due</span>
+          </div>
+        </div>`;
+      }
+
+      wrap.innerHTML = `<table class="table" id="q-table">
         <thead><tr>
-          <th>#</th><th>Building</th><th>Client</th><th>Frequency</th>
-          <th>Annual Value</th><th>Status</th><th>Created</th><th>Valid Until</th><th></th>
+          <th>#</th><th>Building</th><th>Client</th><th>Title</th>
+          <th>Total</th><th>Status</th><th>Sent</th><th>Follow Up</th><th></th>
         </tr></thead>
-        <tbody>${rows.map(p => `<tr>
-          <td><a href="#/proposals/${p.id}" class="link-strong">${p.proposal_number}</a></td>
-          <td>${p.buildings?.name || '—'}</td>
-          <td>${p.buildings?.client_name || '—'}</td>
-          <td>${p.frequency || '—'}</td>
-          <td>${formatCurrency(p.annual_value)}</td>
-          <td>${statusBadge(p.status)}</td>
-          <td>${formatDate(p.created_date)}</td>
-          <td>${formatDate(p.valid_until)}</td>
+        <tbody>${rows.map(q => `<tr data-status="${q.status}">
+          <td><a href="#/quotes/${q.id}" class="link-strong">${q.quote_number}</a></td>
+          <td>${q.buildings?.name || '—'}</td>
+          <td>${q.buildings?.client_name || '—'}</td>
+          <td>${q.title || '—'}</td>
+          <td><strong>${formatCurrency(q.total)}</strong></td>
+          <td>${statusBadge(q.status)}</td>
+          <td>${formatDate(q.sent_date)}</td>
+          <td class="${q.status === 'sent' && isOverdue(q.follow_up_date) ? 'text-danger fw-bold' : ''}">
+            ${formatDate(q.follow_up_date)}
+            ${q.status === 'sent' && isOverdue(q.follow_up_date) ? ' ⚠' : ''}
+          </td>
           <td class="actions">
-            <a href="#/proposals/${p.id}" class="btn btn-xs btn-secondary">View</a>
-            <button class="btn btn-xs btn-danger" data-delete="${p.id}">Delete</button>
+            <a href="#/quotes/${q.id}" class="btn btn-xs btn-secondary">View</a>
+            <button class="btn btn-xs btn-danger" data-delete="${q.id}">Delete</button>
           </td>
         </tr>`).join('')}</tbody>
       </table>`;
-      makeSortable(document.getElementById('prop-table'));
+      makeSortable(document.getElementById('q-table'));
       wrap.querySelectorAll('[data-delete]').forEach(btn =>
-        btn.onclick = () => this.deleteProposal(btn.dataset.delete));
+        btn.onclick = () => this.deleteQuote(btn.dataset.delete));
     } catch (e) {
       wrap.innerHTML = `<div class="error-state">${e.message}</div>`;
     }
   },
 
   async create(container) {
-    setPageTitle('New PM Proposal', [{ label: 'Proposals', href: '#/proposals' }, { label: 'New' }]);
-    await ProposalWizard.init(container);
-    return; // rest of method replaced by wizard
+    setPageTitle('New Quote', [{ label: 'Quotes', href: '#/quotes' }, { label: 'New' }]);
     let buildings = [];
     try { buildings = await Buildings.getAll(); } catch {}
 
     container.innerHTML = `<div class="page-wrap">
       <div class="card">
-        <div class="card-header"><h3>Step 1 — Select Building & Frequency</h3></div>
+        <div class="card-header"><h3>Quote Details</h3></div>
         <div class="card-body">
           <div class="form-row">
             <div class="form-group">
               <label>Building *</label>
-              <select id="prop-building" class="input">
-                <option value="">— Select Building —</option>
-                ${buildings.map(b => `<option value="${b.id}">${b.name} — ${b.client_name || 'No client'}</option>`).join('')}
+              <select id="q-building" class="input">
+                <option value="">— Select —</option>
+                ${buildings.map(b => `<option value="${b.id}">${b.name} — ${b.client_name || ''}</option>`).join('')}
               </select>
             </div>
             <div class="form-group">
-              <label>PM Frequency *</label>
-              <select id="prop-freq" class="input">
-                ${CONFIG.FREQUENCIES.map(f => `<option value="${f.value}" data-visits="${f.visits}">${f.label}</option>`).join('')}
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Contract Start</label>
-              <input type="date" id="prop-start" class="input" value="${today()}">
+              <label>Quote Title</label>
+              <input id="q-title" class="input" placeholder="e.g. Boiler Repair — B-1">
             </div>
           </div>
-          <button class="btn btn-primary" id="prop-load-equip">Load Equipment →</button>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Payment Terms</label>
+              <input id="q-pay-terms" class="input" value="Net 30">
+            </div>
+            <div class="form-group">
+              <label>Valid Until</label>
+              <input type="date" id="q-valid" class="input" value="${addDays(today(), CONFIG.QUOTE_VALID_DAYS)}">
+            </div>
+            <div class="form-group">
+              <label>Follow-Up Date</label>
+              <input type="date" id="q-followup" class="input" value="${addDays(today(), 7)}">
+            </div>
+          </div>
         </div>
       </div>
 
-      <div id="prop-scope-section" hidden>
-        <div class="card" style="margin-top:1rem">
-          <div class="card-header"><h3>Step 2 — Add Equipment to Scope</h3></div>
-          <div class="card-body" id="prop-equip-list">Loading...</div>
+      <div class="card" style="margin-top:1rem">
+        <div class="card-header">
+          <h3>Line Items</h3>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm btn-secondary" id="q-add-labour">+ Labour</button>
+            <button class="btn btn-sm btn-secondary" id="q-add-material">+ Material (with markup)</button>
+            <button class="btn btn-sm btn-secondary" id="q-add-line">+ Custom Line</button>
+          </div>
         </div>
+        <div class="card-body" id="q-lines-wrap">
+          <p class="muted">No line items yet.</p>
+        </div>
+      </div>
 
-        <div class="card" style="margin-top:1rem">
-          <div class="card-header">
-            <h3>Step 3 — Scope Preview & Pricing</h3>
-            <button class="btn btn-sm btn-secondary" id="prop-add-custom">+ Custom Line</button>
+      <div class="card" style="margin-top:1rem">
+        <div class="card-header"><h3>Totals</h3></div>
+        <div class="card-body">
+          <div id="q-totals" class="totals-block"></div>
+          <div class="form-group" style="margin-top:.75rem">
+            <label>Notes (visible on quote)</label>
+            <textarea id="q-notes" class="input" rows="3"></textarea>
           </div>
-          <div class="card-body" id="prop-scope-preview">
-            <p class="muted">Select equipment above to build scope.</p>
+          <div class="form-group">
+            <label>Internal Notes</label>
+            <textarea id="q-int-notes" class="input" rows="2"></textarea>
           </div>
         </div>
+      </div>
 
-        <div class="card" style="margin-top:1rem">
-          <div class="card-header"><h3>Step 4 — Totals & Notes</h3></div>
-          <div class="card-body">
-            <div class="form-row">
-              <div class="form-group">
-                <label>Proposal Title</label>
-                <input id="prop-title" class="input" placeholder="e.g. Annual PM Agreement 2025">
-              </div>
-              <div class="form-group">
-                <label>Payment Terms</label>
-                <input id="prop-terms-pay" class="input" value="Net 30">
-              </div>
-            </div>
-            <div class="form-group">
-              <label>Special Notes</label>
-              <textarea id="prop-notes" class="input" rows="3"></textarea>
-            </div>
-            <div id="prop-totals" class="totals-block"></div>
-          </div>
-        </div>
-        <div class="toolbar" style="margin-top:1rem">
-          <button class="btn btn-secondary" onclick="navigate('/proposals')">← Back to Proposals</button>
-          <button class="btn btn-primary" id="prop-save-btn">Save Proposal</button>
-        </div>
+      <div class="toolbar" style="margin-top:1rem">
+        <button class="btn btn-secondary" onclick="history.back()">Cancel</button>
+        <button class="btn btn-primary" id="q-save-btn">Save Quote</button>
       </div>
     </div>`;
 
-    this._scopeItems = [];
-    this._buildingId = null;
-
-    document.getElementById('prop-load-equip').onclick = () => this.loadEquipmentForScope();
-    document.getElementById('prop-add-custom').onclick = () => this.addCustomLine();
-    document.getElementById('prop-save-btn').onclick   = () => this.saveProposal();
+    this._lines = [];
+    document.getElementById('q-add-line').onclick     = () => this.addLine();
+    document.getElementById('q-add-labour').onclick   = () => this.addLabourLine();
+    document.getElementById('q-add-material').onclick = () => this.addMaterialLine();
+    document.getElementById('q-save-btn').onclick     = () => this.saveQuote();
   },
 
-  async loadEquipmentForScope() {
-    const bid  = document.getElementById('prop-building').value;
-    const freq = document.getElementById('prop-freq').value;
-    if (!bid) { notify.warn('Select a building first.'); return; }
-
-    this._buildingId = bid;
-    this._scopeItems = [];
-    document.getElementById('prop-scope-section').removeAttribute('hidden');
-
-    const el = document.getElementById('prop-equip-list');
-    el.innerHTML = spinner();
-
-    try {
-      const [equip, pricing] = await Promise.all([
-        Equipment.getByBuilding(bid),
-        PricingMatrix.getAll(),
-      ]);
-      this._pricingCache = pricing;
-      this._frequency = freq;
-
-      if (!equip.length) { el.innerHTML = '<p class="muted">No equipment found. Add equipment to this building first.</p>'; return; }
-
-      el.innerHTML = `<table class="table">
-        <thead><tr><th></th><th>Tag</th><th>Type</th><th>Location</th><th>Std Hrs/Visit</th><th>Suggested Price/yr</th></tr></thead>
-        <tbody>${equip.map(e => {
-          const price   = this.lookupPrice(e.equipment_type, freq, pricing);
-          const stdHrs  = this._getStdHoursForDisplay(e.equipment_type, freq);
-          return `<tr>
-            <td><input type="checkbox" class="equip-check" data-id="${e.id}"
-              data-tag="${e.tag || ''}" data-type="${e.equipment_type}"
-              data-price="${price}" data-hrs="${stdHrs ?? ''}"></td>
-            <td>${e.tag || '—'}</td>
-            <td>${e.equipment_type}</td>
-            <td>${e.location || '—'}</td>
-            <td class="text-muted">${stdHrs != null ? stdHrs + ' hrs' : '—'}</td>
-            <td>${price > 0 ? formatCurrency(price) + ' / yr' : '<span class="muted">No rate set</span>'}</td>
-          </tr>`;
-        }).join('')}</tbody>
-      </table>
-      <button class="btn btn-sm btn-primary" id="prop-add-selected" style="margin-top:.75rem">Add Selected to Scope →</button>`;
-
-      document.getElementById('prop-add-selected').onclick = () => this.addSelectedToScope();
-    } catch (e) {
-      el.innerHTML = `<div class="error-state">${e.message}</div>`;
-    }
-  },
-
-  // Price lookup: try EQUIPMASTER standard hours first, then DB pricing matrix, then 0.
-  // Hours-based: sell = stdHours × pmHourlyRate × (1+overhead) / (1-margin)
-  lookupPrice(equipType, freq, pricing) {
-    // 1) Try standard hours from EQUIPMASTER (client-side data, no network)
-    const stdHrs = getStdHours(equipType, freq);
-    if (stdHrs) {
-      return calcPMSellPrice(stdHrs);
-    }
-    // 2) Fall back to DB pricing matrix (manually entered rates)
-    const row = pricing.find(p =>
-      p.equipment_type === equipType && p.service_frequency === freq
-    );
-    return row ? Number(row.sell_price || row.base_price) : 0;
-  },
-
-  // Returns standard hours for display in scope items
-  _getStdHoursForDisplay(equipType, freq) {
-    return getStdHours(equipType, freq) ?? null;
-  },
-
-  addSelectedToScope() {
-    const checks = document.querySelectorAll('.equip-check:checked');
-    if (!checks.length) { notify.warn('Select at least one equipment item.'); return; }
-    const freq = this._frequency;
-    checks.forEach(chk => {
-      const id = chk.dataset.id;
-      if (!this._scopeItems.find(s => s.equipment_id === id)) {
-        this._scopeItems.push({
-          equipment_id: id,
-          tag: chk.dataset.tag,
-          equipment_type: chk.dataset.type,
-          frequency: freq,
-          annual_price: Number(chk.dataset.price),
-          scope_lines: getScopeText(chk.dataset.type, freq),
-        });
-      }
-    });
-    this.renderScopePreview();
-    notify.success(`${checks.length} item(s) added to scope.`);
-  },
-
-  addCustomLine() {
-    this._scopeItems.push({
-      equipment_id: null,
-      tag: 'CUSTOM',
-      equipment_type: 'Custom Item',
-      frequency: this._frequency || 'annual',
-      annual_price: 0,
-      scope_lines: ['Scope to be defined.'],
-    });
-    this.renderScopePreview();
-  },
-
-  renderScopePreview() {
-    const el = document.getElementById('prop-scope-preview');
-    if (!this._scopeItems.length) { el.innerHTML = '<p class="muted">No items in scope.</p>'; this.renderTotals(); return; }
-
-    el.innerHTML = this._scopeItems.map((item, idx) => `
-      <div class="scope-item" id="scope-${idx}">
-        <div class="scope-item-header">
-          <div class="scope-item-title">
-            <strong>${item.tag}</strong> — ${item.equipment_type}
-          </div>
-          <div class="scope-item-controls">
-            <label>Annual Price: $</label>
-            <input type="number" class="input input-sm scope-price" data-idx="${idx}"
-              value="${item.annual_price}" style="width:90px">
-            <button class="btn btn-xs btn-danger" data-remove="${idx}">✕</button>
-          </div>
+  addLabourLine() {
+    const rates = CONFIG.LABOUR_RATES;
+    openModal('Add Labour Line', `
+      <div class="form-row">
+        <div class="form-group">
+          <label>Description</label>
+          <input id="lab-desc" class="input" value="Labour — ">
         </div>
-        <div class="scope-lines">
-          <textarea class="input scope-lines-text" data-idx="${idx}" rows="4"
-            style="font-size:12px">${item.scope_lines.join('\n')}</textarea>
+        <div class="form-group">
+          <label>Hours</label>
+          <input type="number" id="lab-hrs" class="input" step="0.5" value="2">
         </div>
-      </div>`).join('');
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Rate Type</label>
+          <select id="lab-rate-type" class="input">
+            <option value="${rates.weekday_hourly}">Weekday — $${rates.weekday_hourly}/hr</option>
+            <option value="${rates.weekend_hourly}">Weekend/OT — $${rates.weekend_hourly}/hr</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Include Callout?</label>
+          <select id="lab-callout" class="input">
+            <option value="0">No callout</option>
+            <option value="${rates.weekday_callout}" selected>Weekday callout — $${rates.weekday_callout}</option>
+            <option value="${rates.weekend_callout}">Weekend callout — $${rates.weekend_callout}</option>
+          </select>
+        </div>
+      </div>
+      <div id="lab-preview" class="text-muted" style="margin-top:8px;font-size:13px"></div>
+    `, [
+      { label: 'Cancel', class: 'btn-secondary', onClick: closeModal },
+      { label: 'Add Line', class: 'btn-primary', onClick: () => {
+        const desc     = document.getElementById('lab-desc')?.value || 'Labour';
+        const hrs      = parseFloat(document.getElementById('lab-hrs')?.value || 2);
+        const rate     = parseFloat(document.getElementById('lab-rate-type')?.value || rates.weekday_hourly);
+        const callout  = parseFloat(document.getElementById('lab-callout')?.value || 0);
+        const billHrs  = Math.max(hrs, rates.minimum_hours);
+        const total    = callout + (billHrs * rate);
+        this.addLine({ description: desc, qty: 1, unit: 'ls', unit_price: total, total });
+        closeModal();
+      }},
+    ]);
 
-    el.querySelectorAll('.scope-price').forEach(inp => {
-      inp.oninput = (e) => {
-        this._scopeItems[e.target.dataset.idx].annual_price = Number(e.target.value) || 0;
-        this.renderTotals();
+    // Live preview
+    const updatePreview = () => {
+      const hrs     = parseFloat(document.getElementById('lab-hrs')?.value || 2);
+      const rate    = parseFloat(document.getElementById('lab-rate-type')?.value || rates.weekday_hourly);
+      const callout = parseFloat(document.getElementById('lab-callout')?.value || 0);
+      const billHrs = Math.max(hrs, rates.minimum_hours);
+      const total   = callout + (billHrs * rate);
+      const prev    = document.getElementById('lab-preview');
+      if (prev) prev.textContent = `Estimated: ${formatCurrency(callout)} callout + ${billHrs} hrs × $${rate} = ${formatCurrency(total)}`;
+    };
+    setTimeout(() => {
+      ['lab-hrs','lab-rate-type','lab-callout'].forEach(id =>
+        document.getElementById(id)?.addEventListener('input', updatePreview)
+      );
+      updatePreview();
+    }, 50);
+  },
+
+  addMaterialLine() {
+    openModal('Add Material with Markup', `
+      <p class="text-muted mb-8" style="font-size:13px">
+        Enter your cost (what you pay). Sell price is calculated using the markup matrix.
+      </p>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Material Description</label>
+          <input id="mat-desc" class="input" placeholder="e.g. Ball valve 1½″">
+        </div>
+        <div class="form-group">
+          <label>Qty</label>
+          <input type="number" id="mat-qty" class="input" value="1" min="1">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Your Cost per Unit ($)</label>
+          <input type="number" id="mat-cost" class="input" step="0.01" placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <label>Sell Price per Unit ($) <small class="text-muted">auto-calculated</small></label>
+          <input type="number" id="mat-sell" class="input" step="0.01" placeholder="0.00">
+        </div>
+      </div>
+      <div id="mat-preview" class="text-muted" style="font-size:13px;margin-top:4px"></div>
+    `, [
+      { label: 'Cancel', class: 'btn-secondary', onClick: closeModal },
+      { label: 'Add Line', class: 'btn-primary', onClick: () => {
+        const desc  = document.getElementById('mat-desc')?.value || 'Material';
+        const qty   = parseFloat(document.getElementById('mat-qty')?.value || 1);
+        const sell  = parseFloat(document.getElementById('mat-sell')?.value || 0);
+        const total = +(qty * sell).toFixed(2);
+        this.addLine({ description: desc, qty, unit: 'ea', unit_price: sell, total });
+        closeModal();
+      }},
+    ]);
+
+    setTimeout(() => {
+      const updateMarkup = () => {
+        const cost = parseFloat(document.getElementById('mat-cost')?.value || 0);
+        const qty  = parseFloat(document.getElementById('mat-qty')?.value || 1);
+        if (cost > 0) {
+          const sell   = applyMarkup(cost);
+          const prev   = document.getElementById('mat-preview');
+          const sellEl = document.getElementById('mat-sell');
+          if (sellEl) sellEl.value = sell;
+          if (prev) prev.textContent = `Cost $${cost} × ${getMarkupMultiplier(cost)} = sell $${sell} | Line total: ${formatCurrency(qty * sell)}`;
+        }
       };
-    });
-    el.querySelectorAll('.scope-lines-text').forEach(ta => {
-      ta.oninput = (e) => {
-        this._scopeItems[e.target.dataset.idx].scope_lines = e.target.value.split('\n').filter(l => l.trim());
-      };
-    });
-    el.querySelectorAll('[data-remove]').forEach(btn => {
-      btn.onclick = (e) => {
-        this._scopeItems.splice(Number(e.target.dataset.remove), 1);
-        this.renderScopePreview();
-      };
-    });
+      ['mat-cost','mat-qty'].forEach(id =>
+        document.getElementById(id)?.addEventListener('input', updateMarkup)
+      );
+    }, 50);
+  },
+
+  addLine(item = null) {
+    this._lines.push(item || { description: '', qty: 1, unit: 'ls', unit_price: 0, total: 0 });
+    this.renderLines();
+  },
+
+  renderLines() {
+    const wrap = document.getElementById('q-lines-wrap');
+    if (!this._lines.length) { wrap.innerHTML = '<p class="muted">No line items.</p>'; this.renderTotals(); return; }
+    wrap.innerHTML = `<table class="table">
+      <thead><tr><th style="min-width:300px">Description</th><th>Qty</th><th>Unit</th><th>Unit Price</th><th>Total</th><th></th></tr></thead>
+      <tbody>${this._lines.map((l, i) => `<tr>
+        <td><input class="input ql-desc" data-i="${i}" value="${l.description}"></td>
+        <td><input type="number" class="input input-sm ql-qty" data-i="${i}" value="${l.qty}" style="width:60px"></td>
+        <td><input class="input input-sm ql-unit" data-i="${i}" value="${l.unit}" style="width:60px"></td>
+        <td><input type="number" class="input input-sm ql-price" data-i="${i}" value="${l.unit_price}" style="width:90px"></td>
+        <td><strong class="ql-total-${i}">${formatCurrency(l.total)}</strong></td>
+        <td><button class="btn btn-xs btn-danger ql-del" data-i="${i}">✕</button></td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+
+    const recalc = (i) => {
+      const q = Number(document.querySelector(`.ql-qty[data-i="${i}"]`)?.value) || 0;
+      const p = Number(document.querySelector(`.ql-price[data-i="${i}"]`)?.value) || 0;
+      this._lines[i].total = q * p;
+      const el = document.querySelector(`.ql-total-${i}`);
+      if (el) el.textContent = formatCurrency(this._lines[i].total);
+      this.renderTotals();
+    };
+    wrap.querySelectorAll('.ql-desc').forEach(el => el.oninput  = (e) => { this._lines[e.target.dataset.i].description = e.target.value; });
+    wrap.querySelectorAll('.ql-qty').forEach(el  => el.oninput  = (e) => { this._lines[e.target.dataset.i].qty = Number(e.target.value); recalc(e.target.dataset.i); });
+    wrap.querySelectorAll('.ql-unit').forEach(el => el.oninput  = (e) => { this._lines[e.target.dataset.i].unit = e.target.value; });
+    wrap.querySelectorAll('.ql-price').forEach(el=> el.oninput  = (e) => { this._lines[e.target.dataset.i].unit_price = Number(e.target.value); recalc(e.target.dataset.i); });
+    wrap.querySelectorAll('.ql-del').forEach(btn => btn.onclick = (e) => { this._lines.splice(Number(e.target.dataset.i), 1); this.renderLines(); });
     this.renderTotals();
   },
 
   renderTotals() {
-    const el = document.getElementById('prop-totals');
+    const sub = this._lines.reduce((s, l) => s + l.total, 0);
+    const tax = sub * CONFIG.TAX_RATE;
+    const total = sub + tax;
+    const el = document.getElementById('q-totals');
     if (!el) return;
-    const annual   = this._scopeItems.reduce((s, i) => s + (Number(i.annual_price) || 0), 0);
-    const tax      = annual * CONFIG.TAX_RATE;
-    const monthly  = annual / 12;
-    const freqObj  = CONFIG.FREQUENCIES.find(f => f.value === this._frequency);
-    const visits   = freqObj?.visits || 1;
-    el.innerHTML = `<div class="totals-grid">
-      <div class="totals-row"><span>Subtotal (Annual)</span><strong>${formatCurrency(annual)}</strong></div>
-      <div class="totals-row"><span>GST (5%)</span><strong>${formatCurrency(tax)}</strong></div>
-      <div class="totals-row totals-row-bold"><span>Total (Annual + Tax)</span><strong>${formatCurrency(annual + tax)}</strong></div>
-      <div class="totals-row"><span>Monthly Billing</span><strong>${formatCurrency((annual + tax) / 12)}</strong></div>
-      <div class="totals-row"><span>Per Visit (${visits} visits/yr)</span><strong>${formatCurrency(visits > 0 ? annual / visits : 0)}</strong></div>
+    el.innerHTML = `<div class="totals-grid" style="max-width:320px">
+      ${tr2('Subtotal', formatCurrency(sub))}
+      ${tr2(`GST (${(CONFIG.TAX_RATE*100).toFixed(0)}%)`, formatCurrency(tax))}
+      ${tr2('TOTAL', formatCurrency(total), true)}
     </div>`;
+    this._totals = { subtotal: sub, tax_amount: tax, total };
   },
 
-  async saveProposal() {
-    if (!this._buildingId)       { notify.warn('Select a building.'); return; }
-    if (!this._scopeItems.length){ notify.warn('Add at least one scope item.'); return; }
+  async saveQuote() {
+    const bid = document.getElementById('q-building').value;
+    if (!bid)             { notify.warn('Select a building.'); return; }
+    if (!this._lines.length) { notify.warn('Add at least one line item.'); return; }
 
-    const annual = this._scopeItems.reduce((s, i) => s + Number(i.annual_price || 0), 0);
-    const freqObj = CONFIG.FREQUENCIES.find(f => f.value === this._frequency) || { visits: 1 };
-    const num = 'P-' + pad(Date.now().toString().slice(-4));
-    const start = document.getElementById('prop-start').value || today();
-
+    const num = 'Q-' + pad(Date.now().toString().slice(-4));
     const rec = {
-      building_id:   this._buildingId,
-      proposal_number: num,
-      title:         document.getElementById('prop-title').value || 'PM Agreement',
+      building_id:   bid,
+      quote_number:  num,
+      title:         document.getElementById('q-title').value,
       status:        'draft',
       created_date:  today(),
-      valid_until:   addDays(today(), CONFIG.PROPOSAL_VALID_DAYS),
-      contract_start: start,
-      frequency:     this._frequency,
-      visits_per_year: freqObj.visits,
-      annual_value:  annual,
-      monthly_value: annual / 12,
-      payment_terms: document.getElementById('prop-terms-pay').value || 'Net 30',
-      scope_items:   this._scopeItems,
-      notes:         document.getElementById('prop-notes').value,
+      valid_until:   document.getElementById('q-valid').value,
+      follow_up_date: document.getElementById('q-followup').value,
+      payment_terms: document.getElementById('q-pay-terms').value || 'Net 30',
+      line_items:    this._lines,
+      subtotal:      this._totals?.subtotal || 0,
+      tax_rate:      CONFIG.TAX_RATE,
+      tax_amount:    this._totals?.tax_amount || 0,
+      total:         this._totals?.total || 0,
+      notes:         document.getElementById('q-notes').value,
+      internal_notes: document.getElementById('q-int-notes').value,
     };
 
     try {
       const saved = await DB.create(rec);
-      notify.success('Proposal saved.');
-      navigate(`/proposals/${saved.id}`);
+      notify.success('Quote saved.');
+      navigate(`/quotes/${saved.id}`);
     } catch (e) {
       notify.error(e.message);
     }
   },
 
   async detail(id, container) {
-    container.innerHTML = spinner('Loading proposal...');
+    container.innerHTML = spinner('Loading...');
     try {
-      const p = await DB.getById(id);
-      const b = p.buildings;
-      setPageTitle(`Proposal ${p.proposal_number}`, [
-        { label: 'Proposals', href: '#/proposals' },
-        { label: p.proposal_number },
-      ]);
-
+      const q = await DB.getById(id);
+      const b = q.buildings;
+      setPageTitle(`Quote ${q.quote_number}`, [{ label: 'Quotes', href: '#/quotes' }, { label: q.quote_number }]);
       container.innerHTML = `<div class="page-wrap">
         <div class="toolbar">
-          <button class="btn btn-secondary btn-sm" onclick="navigate('/proposals')">← All Proposals</button>
-          ${b?.id ? `<button class="btn btn-secondary btn-sm" onclick="navigate('/buildings/${b.id}')">${b.name}</button>` : ''}
+          ${statusBadge(q.status)}
           <div class="toolbar-right">
-            <select id="prop-status-sel" class="input input-sm" style="max-width:140px">
-              ${CONFIG.PROPOSAL_STATUSES.map(s => `<option ${s === p.status ? 'selected' : ''}>${s}</option>`).join('')}
+            <select id="q-status-sel" class="input input-sm" style="max-width:130px">
+              ${CONFIG.QUOTE_STATUSES.map(s => `<option ${s === q.status ? 'selected' : ''}>${s}</option>`).join('')}
             </select>
-            <button class="btn btn-sm btn-secondary" id="prop-update-status">Update Status</button>
-            <button class="btn btn-sm btn-primary" id="prop-pdf-btn">Export PDF</button>
+            <button class="btn btn-sm btn-secondary" id="q-update-status">Update Status</button>
+            <button class="btn btn-sm btn-primary" id="q-pdf-btn">Export PDF</button>
           </div>
         </div>
-
         <div class="card">
-          <div class="card-header"><h3>Proposal Details</h3></div>
+          <div class="card-header"><h3>Quote ${q.quote_number}</h3></div>
           <div class="card-body detail-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
-            ${df2('Proposal #', p.proposal_number)} ${df2('Status', statusBadge(p.status), true)}
-            ${df2('Building', b?.id ? `<a href="#/buildings/${b.id}">${b.name}</a>` : (b?.name||'—'), true)} ${df2('Client', b?.client_name)}
-            ${df2('Frequency', p.frequency)} ${df2('Visits / Year', p.visits_per_year)}
-            ${df2('Created', formatDate(p.created_date))} ${df2('Valid Until', formatDate(p.valid_until))}
-            ${df2('Annual Value', formatCurrency(p.annual_value))} ${df2('Monthly Billing', formatCurrency(p.monthly_value))}
+            <div class="detail-field"><span class="detail-label">Building</span><span>${b?.name || '—'}</span></div>
+            <div class="detail-field"><span class="detail-label">Client</span><span>${b?.client_name || '—'}</span></div>
+            <div class="detail-field"><span class="detail-label">Title</span><span>${q.title || '—'}</span></div>
+            <div class="detail-field"><span class="detail-label">Created</span><span>${formatDate(q.created_date)}</span></div>
+            <div class="detail-field"><span class="detail-label">Valid Until</span><span>${formatDate(q.valid_until)}</span></div>
+            <div class="detail-field"><span class="detail-label">Follow-Up</span><span class="${isOverdue(q.follow_up_date) && q.status === 'sent' ? 'text-danger' : ''}">${formatDate(q.follow_up_date)}</span></div>
           </div>
         </div>
-
         <div class="card" style="margin-top:1rem">
-          <div class="card-header"><h3>Scope of Work (${(p.scope_items || []).length} items)</h3></div>
+          <div class="card-header"><h3>Line Items</h3></div>
           <div class="card-body">
-            ${(p.scope_items || []).map(item => `
-              <div class="scope-item-view">
-                <div class="scope-item-header">
-                  <strong>${item.tag} — ${item.equipment_type}</strong>
-                  <span>${formatCurrency(item.annual_price)} / yr</span>
-                </div>
-                <ul class="scope-list">
-                  ${(item.scope_lines || []).map(l => `<li>${l}</li>`).join('')}
-                </ul>
-              </div>`).join('')}
-          </div>
-        </div>
-
-        <div class="card" style="margin-top:1rem">
-          <div class="card-header"><h3>Pricing Summary</h3></div>
-          <div class="card-body">
-            <div class="totals-grid" style="max-width:360px">
-              ${totRow('Subtotal (Annual)', formatCurrency(p.annual_value))}
-              ${totRow(`GST (${(CONFIG.TAX_RATE*100).toFixed(0)}%)`, formatCurrency(p.annual_value * CONFIG.TAX_RATE))}
-              ${totRow('Total Annual', formatCurrency(p.annual_value * (1 + CONFIG.TAX_RATE)), true)}
-              ${totRow('Monthly Billing', formatCurrency(p.monthly_value * (1 + CONFIG.TAX_RATE)))}
+            <table class="table">
+              <thead><tr><th>Description</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr></thead>
+              <tbody>${(q.line_items || []).map(l => `<tr>
+                <td>${l.description}</td>
+                <td>${l.qty}</td>
+                <td>${formatCurrency(l.unit_price)}</td>
+                <td>${formatCurrency(l.total)}</td>
+              </tr>`).join('')}</tbody>
+            </table>
+            <div class="totals-grid" style="max-width:300px;margin-top:.75rem">
+              ${tr2('Subtotal', formatCurrency(q.subtotal))}
+              ${tr2(`GST (${((q.tax_rate || CONFIG.TAX_RATE)*100).toFixed(0)}%)`, formatCurrency(q.tax_amount))}
+              ${tr2('TOTAL', formatCurrency(q.total), true)}
             </div>
           </div>
         </div>
-        ${p.notes ? `<div class="card" style="margin-top:1rem"><div class="card-header"><h3>Notes</h3></div><div class="card-body"><p>${p.notes}</p></div></div>` : ''}
+        ${q.notes ? `<div class="card" style="margin-top:1rem"><div class="card-header"><h3>Notes</h3></div><div class="card-body"><p>${q.notes}</p></div></div>` : ''}
+        ${q.internal_notes ? `<div class="card" style="margin-top:1rem;border-left:3px solid var(--warning)"><div class="card-header"><h3>Internal Notes</h3></div><div class="card-body"><p>${q.internal_notes}</p></div></div>` : ''}
       </div>`;
 
-      document.getElementById('prop-pdf-btn').onclick = () => {
-        if (!window.jspdf) { notify.error('jsPDF library not loaded.'); return; }
-        generateProposalPDF(p, b);
+      document.getElementById('q-pdf-btn').onclick = () => {
+        if (!window.jspdf) { notify.error('jsPDF not loaded.'); return; }
+        generateQuotePDF(q, b);
       };
-      document.getElementById('prop-update-status').onclick = async () => {
-        const status = document.getElementById('prop-status-sel').value;
+      document.getElementById('q-update-status').onclick = async () => {
+        const status = document.getElementById('q-status-sel').value;
+        const upd = { status };
+        if (status === 'sent' && !q.sent_date) upd.sent_date = today();
         try {
-          await DB.update(id, { status });
+          await DB.update(id, upd);
           notify.success('Status updated.');
-          navigate(`/proposals/${id}`);
-        } catch (e) {
-          notify.error(e.message);
-        }
+          navigate(`/quotes/${id}`);
+        } catch (e) { notify.error(e.message); }
       };
     } catch (e) {
       container.innerHTML = `<div class="page-wrap error-state">${e.message}</div>`;
     }
   },
 
-  async deleteProposal(id) {
-    const ok = await confirm('Delete this proposal?');
+  async deleteQuote(id) {
+    const ok = await confirm('Delete this quote?');
     if (!ok) return;
     try {
       await DB.delete(id);
-      notify.success('Proposal deleted.');
+      notify.success('Quote deleted.');
       await this.loadTable();
     } catch (e) {
       notify.error(e.message);
@@ -435,10 +478,6 @@ export const Proposals = {
   },
 };
 
-function df2(label, val, html = false) {
-  return `<div class="detail-field"><span class="detail-label">${label}</span>
-    <span class="detail-value">${html ? val : (val || '—')}</span></div>`;
-}
-function totRow(label, val, bold = false) {
-  return `<div class="totals-row ${bold ? 'totals-row-bold' : ''}"><span>${label}</span><strong>${val}</strong></div>`;
+function tr2(l, v, bold = false) {
+  return `<div class="totals-row ${bold ? 'totals-row-bold' : ''}"><span>${l}</span><strong>${v}</strong></div>`;
 }
