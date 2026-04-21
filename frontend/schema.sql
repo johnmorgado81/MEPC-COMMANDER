@@ -506,3 +506,18 @@ do $$ begin
   create trigger equipment_manufacturers_no_upd before update on equipment_manufacturers
     for each row execute function set_updated_at();
 exception when duplicate_object then null; end $$;
+
+-- ============================================================
+-- MEPC Commander v1.3 — Equipment registry expansion
+-- Run in Supabase SQL Editor
+-- ============================================================
+do $$ begin
+  alter table equipment add column if not exists consumables              jsonb    default '[]'::jsonb;
+  alter table equipment add column if not exists ocr_raw                  text;
+  alter table equipment add column if not exists review_status            text     default 'ok';
+  alter table equipment add column if not exists is_duplicate             boolean  default false;
+  alter table equipment add column if not exists annual_cleaning_enabled  boolean  default false;
+  alter table equipment add column if not exists import_batch             text;
+  alter table equipment add column if not exists make                     text;
+  -- make is legacy alias for manufacturer; keep both
+exception when others then null; end $$;

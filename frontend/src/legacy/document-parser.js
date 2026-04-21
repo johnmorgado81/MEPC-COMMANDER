@@ -494,7 +494,15 @@ function showImportModal(state, buildings) {
         ${CONFIG.SERVICE_AREAS.map(a=>`<option value="${a.value}">${a.label}</option>`).join('')}
       </select>
     </div>
-    <div class="alert alert-info" style="margin-top:10px">${checked.length} item(s) will be imported as equipment records.</div>`,
+    <div class="form-group">
+      <label>Import Mode</label>
+      <select id="imp-mode" class="input">
+        <option value="append">Append — add to existing equipment</option>
+        <option value="merge">Merge — skip if same tag already exists</option>
+        <option value="replace">Replace — delete existing first, then import</option>
+      </select>
+    </div>
+    <div class="alert alert-info" style="margin-top:10px">${checked.length} item(s) selected. Original OCR text will be preserved in records.</div>`,
     [
       { label: 'Cancel', class: 'btn-secondary', onClick: closeModal },
       { label: `Import ${checked.length}`, class: 'btn-primary', onClick: () => runImport(state, checked) },
@@ -505,25 +513,66 @@ function showImportModal(state, buildings) {
 async function runImport(state, indices) {
   const bid  = document.getElementById('imp-bld')?.value;
   const area = document.getElementById('imp-area')?.value;
+  const mode = document.getElementById('imp-mode')?.value || 'append';
   if (!bid) { notify.warn('Select a building.'); return; }
   closeModal();
+
+  // Replace mode: delete existing equipment first
+  if (mode === 'replace') {
+    try {
+      const existing = await EquipDB.getByBuilding(bid);
+      for (const ex of (existing||[])) { try { await EquipDB.delete(ex.id); } catch {} }
+    } catch {}
+  }
+
+  // Merge mode: get existing tags for dedup
+  let existingTags = new Set();
+  if (mode === 'merge') {
+    try {
+      const ex = await EquipDB.getByBuilding(bid);
+      existingTags = new Set((ex||[]).map(e => (e.tag||'').trim().toUpperCase()));
+    } catch {}
+  }
+
   const today = new Date().toISOString().slice(0,10);
-  let ok = 0, fail = 0;
+  const batchId = Date.now().toString(36);
+  let ok = 0, skip = 0, fail = 0;
+
   for (const i of indices) {
     const it = state.items[i];
+    if (mode === 'merge' && it.tag && existingTags.has((it.tag||'').trim().toUpperCase())) { skip++; continue; }
+
+    // Auto-fill std hours from EQUIPMASTER
+    let qhrs = null, ahrs = null;
+    try {
+      const { findEquipType } = await import('./equipmaster.js');
+      const std = findEquipType(it.equipment_type);
+      if (std) { qhrs = std.quarterly_hours || null; ahrs = std.annual_hours || null; }
+    } catch {}
+
     try {
       await EquipDB.create({
-        building_id: bid,
-        tag: it.tag || null,
+        building_id:    bid,
+        tag:            it.tag || null,
         equipment_type: it.equipment_type || 'Other',
-        make: it.make || null,
-        model: it.model || null,
-        serial_number: it.serial_number || null,
-        service_area: area || 'common_strata',
-        status: 'active',
-        qty: parseInt(it.quantity) || 1,
-        location: it.location || null,
-        notes: [it.capacity, it.filter_size, it.voltage, it.refrigerant, it.notes].filter(Boolean).join(' | ') || null,
+        manufacturer:   it.make || null,
+        make:           it.make || null,
+        model:          it.model || null,
+        serial_number:  it.serial_number || null,
+        service_area:   area || 'common_strata',
+        status:         'active',
+        qty:            parseInt(it.quantity) || 1,
+        location:       it.location || null,
+        capacity:       it.capacity || null,
+        refrigerant:    it.refrigerant || null,
+        notes:          [it.filter_size, it.voltage, it.notes].filter(Boolean).join(' | ') || null,
+        ocr_raw:        it.notes || null,
+        quarterly_hours: qhrs,
+        annual_hours:    ahrs,
+        review_status:   'needs-review',
+        import_batch:    batchId,
+        source_type:     'import',
+        match_confidence: it.equipment_type && it.equipment_type !== 'Other' ? 'auto' : 'low',
         next_service_date: today,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -531,8 +580,10 @@ async function runImport(state, indices) {
       ok++;
     } catch { fail++; }
   }
-  if (ok)   notify.success(`${ok} equipment record(s) created.`);
-  if (fail) notify.warn(`${fail} failed — check for duplicate tags.`);
+
+  if (ok)   notify.success(`${ok} record(s) created.${skip?' '+skip+' skipped (merge)':''}${fail?' '+fail+' failed.':''}`);
+  else if (skip) notify.info(`All ${skip} item(s) already exist (merge mode).`);
+  else if (fail) notify.warn(`Import failed — check for schema issues.`);
 }
 
 function doExportCSV(state) {
