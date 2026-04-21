@@ -1,7 +1,8 @@
 // proposal-wizard.js — PM Quote MVP
 // Steps: Building → Equipment → Price + Subcontractors → Generate
 import { Proposals as DB, Buildings as BuildingsDB } from './db.js';
-import { CONFIG, calcPMSellPrice } from './config.js';
+import { CONFIG } from './config.js';
+import { sellFromHours, stdHours, deriveVisitCount as _engineVisitCount, assetToScopeItem } from './pm-engine.js';
 import { EQUIPMASTER, EQUIPMASTER_MANUFACTURERS, findEquipType, getStdHours, CATEGORIES } from './equipmaster.js';
 import { getScopeText } from './scope-library.js';
 import { generateProposalPDFEnhanced } from './pdf-export.js';
@@ -723,22 +724,13 @@ function _normalizeItem(raw) {
 }
 
 function _calcPrice(n) {
-  const freq    = n.frequency || S.frequency || 'quarterly';
-  const visits  = { quarterly: 3, 'semi-annual': 2, monthly: 12, annual: 1 }[freq] || 3;
-  const qty     = Number(n.qty) || 1;
-  const qh      = Number(n.qtrHrs)      || 0;
-  const clean   = Number(n.annCleanHrs) || 0;
-  // Core formula: (quarterly_hrs × visits × qty) + (annual_cleaning_hrs × qty)
-  let totalHrs;
-  // Use explicit visit count from quarter checkboxes when available
-  const visitCount = (S && S.quarterVisits) ? _deriveVisitCount() : visits;
-  const annClean   = (S && S.quarterVisits?.annual_clean) || n.annCleanEnabled;
-  const cleanHrs   = annClean ? clean : 0;
-  if (freq === 'monthly') totalHrs = (qh * 12 * qty) + (cleanHrs * qty);
-  else totalHrs = (qh * visitCount * qty) + (cleanHrs * qty);
-  return calcPMSellPrice(totalHrs);
+  const qty      = Number(n.qty) || 1;
+  const qh       = Number(n.qtrHrs) || 0;
+  const cleanHrs = Number(n.annCleanHrs) || 0;
+  const visitCount = _deriveVisitCount();
+  const totalHrs = (qh * visitCount * qty) + (cleanHrs * qty);
+  return sellFromHours(totalHrs);
 }
-
 
 // ─── Quarter visit helpers ─────────────────────────────────────────────────────
 function _deriveFrequency() {
@@ -751,10 +743,7 @@ function _deriveFrequency() {
   return 'quarterly';
 }
 
-function _deriveVisitCount() {
-  return [S.quarterVisits.q1, S.quarterVisits.q2, S.quarterVisits.q3, S.quarterVisits.q4].filter(Boolean).length;
-}
-
+function _deriveVisitCount() { return _engineVisitCount(S.quarterVisits); }
 function _updateVisitSummary() {
   const el = document.getElementById('wiz-visit-summary');
   if (!el) return;

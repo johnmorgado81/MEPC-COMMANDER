@@ -5,32 +5,14 @@ import { formatCurrency, formatDate, statusBadge, exportCSV, today } from './hel
 import { openModal, closeModal, confirm, notify, makeSortable, spinner, emptyState } from './ui.js';
 import { navigate } from './router.js';
 import { findEquipType, getEquipDefaults, EQUIPMASTER, EQUIPMASTER_MANUFACTURERS, EQUIPMASTER_CATEGORIES } from './equipmaster.js';
+import { calcRow, sellFromHours, stdHours, deriveVisitCount } from './pm-engine.js';
 
 const SA = { common_strata:'Common Strata', commercial:'Commercial', residential_in_suite:'Residential / In-Suite' };
 const sal = v => SA[v] || v || '—';
 const $id = id => document.getElementById(id);
-const SELL_RATE = 152;
-
-// ── Hours engine ───────────────────────────────────────────────────────────────
-function effQtrHrs(e) {
-  return parseFloat(e.override_quarterly_hours ?? e.quarterly_hours ?? 0) || 0;
-}
-function effAnnHrs(e) {
-  if (!e.annual_cleaning_enabled) return 0;
-  return parseFloat(e.override_annual_hours ?? e.annual_hours ?? 0) || 0;
-}
-function rowAnnualHrs(e) {
-  const qty = parseInt(e.qty) || 1;
-  return ((effQtrHrs(e) * 3) + effAnnHrs(e)) * qty;
-}
-function rowSell(e) {
-  const hrs = rowAnnualHrs(e);
-  if (!hrs) return 0;
-  const cost = hrs * (CONFIG.LABOUR_RATES?.pm_hourly || SELL_RATE);
-  const oh = CONFIG.PM_OVERHEAD_PCT || 0.30;
-  const mg = CONFIG.PM_MARGIN_PCT   || 0.20;
-  return +((cost * (1 + oh)) / (1 - mg)).toFixed(2);
-}
+// ── Hours engine — delegates to pm-engine.js ──────────────────────────────────
+function rowAnnualHrs(e, qv) { return calcRow(e, qv).rowTotalHrs; }
+function rowSell(e, qv)      { return calcRow(e, qv).rowSell; }
 
 // ── Duplicate detection ────────────────────────────────────────────────────────
 function flagDuplicates(rows) {

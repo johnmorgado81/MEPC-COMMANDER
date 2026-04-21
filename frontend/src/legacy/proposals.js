@@ -1,6 +1,7 @@
 import { setPageTitle }    from './app.js';
 import { Proposals as DB, Buildings, Equipment, PricingMatrix } from './db.js';
-import { CONFIG, calcPMSellPrice } from './config.js';
+import { CONFIG } from './config.js';
+import { calcProposalTotals, buildProposalPayload, regimenLabel, deriveVisitCount } from './pm-engine.js';
 import { getScopeText }    from './scope-library.js';
 import { generateProposalPDF } from './pdf-export.js';
 import { formatCurrency, formatDate, statusBadge, today, addDays, pad } from './helpers.js';
@@ -12,13 +13,7 @@ import { ProposalWizard }  from './proposal-wizard.js';
 const SA = { common_strata:'Common Strata', commercial:'Commercial', residential_in_suite:'Residential / In-Suite' };
 const sal = v => SA[v] || v || '—';
 
-// Hours engine (mirrors equipment.js)
-function rowAnnualHrs(e) {
-  const qty = parseInt(e.qty)||1;
-  const qh  = parseFloat(e.override_quarterly_hours ?? e.quarterly_hours ?? 0) || 0;
-  const ah  = e.annual_cleaning_enabled ? (parseFloat(e.override_annual_hours ?? e.annual_hours ?? 0)||0) : 0;
-  return ((qh * 3) + ah) * qty;
-}
+// rowAnnualHrs delegated to pm-engine.js calcRow
 
 export const Proposals = {
 
@@ -83,9 +78,12 @@ export const Proposals = {
       setPageTitle(`Proposal ${p.proposal_number}`);
 
       const scope = p.scope_items || [];
-      const annual = scope.reduce((s,i) => s + (Number(i.annual_price)||0), 0);
-      const tax    = annual * (CONFIG.TAX_RATE || 0.05);
-      const freqObj = CONFIG.FREQUENCIES?.find(f => f.value === p.frequency) || { visits: 4 };
+      const _qv    = p.quarter_visits || null;
+      const _tots  = calcProposalTotals(scope, p.manual_items, _qv);
+      const annual = _tots.annual;
+      const tax    = (CONFIG.COMPANY?.show_gst === true) ? annual * (CONFIG.TAX_RATE||0.05) : 0;
+      const freqObj = CONFIG.FREQUENCIES?.find(f => f.value === p.frequency) || { visits: _tots.visits || 4 };
+      const regimenStr = _qv ? regimenLabel(_qv) : (p.frequency || 'quarterly');
 
       // Readiness check
       const checks = [];
@@ -147,11 +145,11 @@ export const Proposals = {
           <div class="card-body">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
               <div class="totals-grid">
-                ${totRow('Subtotal (Annual)',formatCurrency(annual))}
-                ${totRow('GST (5%)',formatCurrency(tax))}
-                ${totRow('Total Annual + Tax',formatCurrency(annual+tax),true)}
-                ${totRow('Monthly Billing',formatCurrency((annual+tax)/12))}
-                ${totRow(`Per Visit (${freqObj.visits} visits/yr)`,formatCurrency(freqObj.visits>0?annual/freqObj.visits:0))}
+                ${totRow('Annual Contract Value',formatCurrency(annual),true)}
+                ${totRow('Monthly Billing',formatCurrency(annual/12))}
+                ${tax>0?totRow('GST',formatCurrency(tax)):''}
+                ${tax>0?totRow('Total incl. Tax',formatCurrency(annual+tax),false):''}
+                ${totRow('Service Regimen',regimenStr||p.frequency||'quarterly')}
               </div>
               <div>
                 <div style="font-family:var(--font-cond);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">Equipment Count</div>
