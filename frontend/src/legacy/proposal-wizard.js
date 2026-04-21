@@ -718,7 +718,9 @@ function _normalizeItem(raw) {
   }
   const annCleanHrs = match ? (match.annual_hours || 0) : (qtrHrs * 2);
   const n = { ...raw, equipmaster, conf, category, qtrHrs, annHrs, annCleanHrs, frequency: S.frequency,
-    manufacturer: raw.manufacturer || '', model: raw.model || '' };
+    manufacturer: raw.manufacturer || '', model: raw.model || '',
+    // Per-row visit controls — default from global S.quarterVisits
+    itemQV: { ...S.quarterVisits } };
   n.annual_price = _calcPrice(n);
   return n;
 }
@@ -726,9 +728,11 @@ function _normalizeItem(raw) {
 function _calcPrice(n) {
   const qty      = Number(n.qty) || 1;
   const qh       = Number(n.qtrHrs) || 0;
-  const cleanHrs = Number(n.annCleanHrs) || 0;
-  const visitCount = _deriveVisitCount();
-  const totalHrs = (qh * visitCount * qty) + (cleanHrs * qty);
+  // Per-item annual cleaning: only include if item's own flag is set
+  const qv       = n.itemQV || S.quarterVisits;
+  const visits   = [qv.q1,qv.q2,qv.q3,qv.q4].filter(Boolean).length || 4;
+  const cleanHrs = qv.annual_clean ? (Number(n.annCleanHrs) || 0) : 0;
+  const totalHrs = (qh * visits * qty) + (cleanHrs * qty);
   return sellFromHours(totalHrs);
 }
 
@@ -792,6 +796,22 @@ function _renderNormTable() {
           <button class="btn btn-xs btn-ghost norm-reset" data-i="${i}" title="Reset to EQUIPMASTER standard">↺</button>
           <button class="btn btn-xs btn-danger norm-del" data-i="${i}">✕</button>
         </td>
+      </tr>
+      <tr data-qv="${i}" style="background:var(--bg3);border-bottom:1px solid var(--border2)">
+        <td colspan="2" style="padding:4px 12px 6px;font-size:11px;color:var(--text-muted)">Visits:</td>
+        <td colspan="6" style="padding:4px 8px 6px">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            ${['q1','q2','q3','q4'].map(q => `<label style="display:flex;align-items:center;gap:3px;cursor:pointer;font-size:11.5px">
+              <input type="checkbox" class="item-qv-chk" data-i="${i}" data-q="${q}" ${(n.itemQV||S.quarterVisits)[q]?'checked':''}>
+              <span>${q.toUpperCase()}</span></label>`).join('')}
+            <label style="display:flex;align-items:center;gap:3px;cursor:pointer;font-size:11.5px;margin-left:8px;padding-left:8px;border-left:1px solid var(--border2)">
+              <input type="checkbox" class="item-qv-chk" data-i="${i}" data-q="annual_clean" ${(n.itemQV||S.quarterVisits).annual_clean?'checked':''}>
+              <span style="color:var(--orange)">Ann. Cleaning (${stdClean||'?'} hrs)</span></label>
+            <span style="font-size:10.5px;color:var(--text-muted);margin-left:6px">${
+              (() => { const v=n.itemQV||S.quarterVisits; const c=[v.q1,v.q2,v.q3,v.q4].filter(Boolean).length; return c+' visit'+(c!==1?'s':'')+'/yr'+(v.annual_clean?'+Clean':''); })()
+            }</span>
+          </div>
+        </td>
       </tr>`;}).join('')}</tbody>
     </table>
     <datalist id="wiz-norm-dl">${(EQUIPMASTER||[]).map(e => `<option value="${e.equipment_type}">${e.equipment_type} (${e.category})</option>`).join('')}</datalist>
@@ -838,6 +858,8 @@ function _bindNormTable() {
           annHrs:       match.annual_hours    || 4,
           annCleanHrs:  match.annual_hours    || 0,
           conf:         'strong',
+          // Refresh scope lines immediately so saved proposal gets correct text
+          scope_lines:  getScopeText(match.equipment_type, S.frequency || 'quarterly') || [],
         });
         S.normalized[i].annual_price = _calcPrice(S.normalized[i]);
       }
@@ -873,6 +895,26 @@ function _bindNormTable() {
   document.querySelectorAll('.norm-price').forEach(inp => {
     inp.oninput = () => { S.normalized[Number(inp.dataset.i)].annual_price = Number(inp.value)||0; _refreshTotals(); };
   });
+
+  // Per-row visit checkboxes
+  document.querySelectorAll('.item-qv-chk').forEach(chk => {
+    chk.onchange = () => {
+      const i = Number(chk.dataset.i);
+      if (!S.normalized[i]) return;
+      if (!S.normalized[i].itemQV) S.normalized[i].itemQV = { ...S.quarterVisits };
+      S.normalized[i].itemQV[chk.dataset.q] = chk.checked;
+      // Recalc this row immediately
+      S.normalized[i].annual_price = _calcPrice(S.normalized[i]);
+      const priceInp = document.querySelector(`.norm-price[data-i="${i}"]`);
+      if (priceInp) priceInp.value = S.normalized[i].annual_price.toFixed(0);
+      // Update visit summary label in same QV row
+      const v = S.normalized[i].itemQV;
+      const cnt = [v.q1,v.q2,v.q3,v.q4].filter(Boolean).length;
+      const sumEl = document.querySelector(`tr[data-qv="${i}"] span:last-child`);
+      if (sumEl) sumEl.textContent = cnt+' visit'+(cnt!==1?'s':'')+'/yr'+(v.annual_clean?'+Clean':'');
+      _refreshTotals();
+    };
+  });
 }
 
 function _saveNormTable() {
@@ -888,6 +930,13 @@ function _saveNormTable() {
   });
   document.querySelectorAll('.norm-model').forEach(inp => {
     if (S.normalized[Number(inp.dataset.i)]) S.normalized[Number(inp.dataset.i)].model = inp.value;
+  });
+  // Persist per-row itemQV from checkboxes
+  document.querySelectorAll('.item-qv-chk').forEach(chk => {
+    const i = Number(chk.dataset.i);
+    if (!S.normalized[i]) return;
+    if (!S.normalized[i].itemQV) S.normalized[i].itemQV = { ...S.quarterVisits };
+    S.normalized[i].itemQV[chk.dataset.q] = chk.checked;
   });
 }
 
@@ -1174,6 +1223,7 @@ async function _saveProposal(exportPdf) {
     frequency:      n.frequency || S.frequency,
     annual_price:   Number(n.annual_price) || 0,
     qty:            Number(n.qty) || 1,
+    item_qv:        n.itemQV || S.quarterVisits,
     category:       n.category || 'Other',
     confidence:     n.conf,
     manufacturer:   n.manufacturer || '',

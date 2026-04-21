@@ -345,6 +345,8 @@ export const Settings = {
     let saved = null;
     try { saved = await UserSettings.get('company_profile'); } catch {}
     const c = saved ? { ...CONFIG.COMPANY, ...saved } : { ...CONFIG.COMPANY };
+    // Mirror to localStorage so pdf-export can read synchronously
+    if (saved) { try { localStorage.setItem('mepc_company_profile', JSON.stringify(c)); } catch {} }
 
     el.innerHTML = `
       <div class="card">
@@ -504,6 +506,7 @@ export const Settings = {
       try {
         await UserSettings.set('company_profile', data);
         Object.assign(CONFIG.COMPANY, data);
+        try { localStorage.setItem('mepc_company_profile', JSON.stringify(data)); } catch {}
         notify.success('Company profile saved.');
       } catch(err) { notify.error(err.message); }
     });
