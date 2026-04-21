@@ -49,8 +49,26 @@ const S = {
   paymentTerms: 'Net 30',
   coverImageDataUrl: null,
   rfpScope: [],
+  manualItems: [],
   buildingsList: [],
+  _dirty: false,
 };
+
+
+// ─── Draft persistence ────────────────────────────────────────────────────────
+const DRAFT_KEY = 'mepc_proposal_draft';
+function _saveDraft() {
+  try {
+    const { buildingsList, coverImageDataUrl, ...save } = S;
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(save));
+  } catch {}
+}
+function _loadDraft() {
+  try { const v = localStorage.getItem(DRAFT_KEY); return v ? JSON.parse(v) : null; } catch { return null; }
+}
+function _clearDraft() {
+  try { localStorage.removeItem(DRAFT_KEY); } catch {}
+}
 
 function resetState() {
   Object.assign(S, {
@@ -73,7 +91,33 @@ function resetState() {
 // ─── Entry point ──────────────────────────────────────────────────────────────
 export const ProposalWizard = {
   async init(container) {
-    resetState();
+    // Restore draft from localStorage if present
+    const draft = _loadDraft();
+    if (draft && (draft.rawEquipment?.length || draft.building?.name)) {
+      const useDraft = await new Promise(res => {
+        const d = document.createElement('div');
+        d.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:2000;display:flex;align-items:center;justify-content:center';
+        d.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:28px 32px;max-width:400px;text-align:center">
+          <div style="font-size:15px;font-weight:600;margin-bottom:8px">Unsaved Draft Found</div>
+          <div style="font-size:13px;color:var(--text-dim);margin-bottom:20px">You have a proposal in progress for <strong>${draft.building?.name||'unnamed building'}</strong> (${draft.rawEquipment?.length||0} items). Continue or start fresh?</div>
+          <div style="display:flex;gap:10px;justify-content:center">
+            <button id="draft-fresh" class="btn btn-secondary">Start Fresh</button>
+            <button id="draft-restore" class="btn btn-primary">Resume Draft</button>
+          </div>
+        </div>`;
+        document.body.appendChild(d);
+        d.querySelector('#draft-fresh').onclick   = () => { d.remove(); res(false); };
+        d.querySelector('#draft-restore').onclick = () => { d.remove(); res(true); };
+      });
+      if (useDraft) {
+        Object.assign(S, draft);
+      } else {
+        resetState();
+        _clearDraft();
+      }
+    } else {
+      resetState();
+    }
     try { S.buildingsList = await BuildingsDB.getAll(); } catch { S.buildingsList = []; }
     this._container = container;
     this._render();
@@ -87,7 +131,7 @@ export const ProposalWizard = {
     steps[S.step]?.(body, this);
   },
 
-  goTo(n) { S.step = n; this._render(); },
+  goTo(n) { S.step = n; _saveDraft(); this._render(); },
   next()   { this.goTo(S.step + 1); },
   back()   { this.goTo(S.step - 1); },
 };
@@ -126,7 +170,10 @@ async function _step1(el, wiz) {
     </div>
   </div>`;
 
-  document.getElementById('s1-cancel').onclick = () => navigate('/proposals');
+  document.getElementById('s1-cancel').onclick = async () => {
+    if ((S.rawEquipment.length || S.building.name) && !await _confirmDiscard()) return;
+    _clearDraft(); resetState(); navigate('/proposals');
+  };
   document.getElementById('s1-next').onclick = () => { _saveBldFields(); wiz.next(); };
 
   document.getElementById('bld-link').onchange = async (e) => {
@@ -562,6 +609,11 @@ async function _step3(el, wiz) {
     <div class="form-section-label">Equipment — Labour-Based PM Pricing</div>
     <div id="norm-table-wrap">${_renderNormTable()}</div>
 
+    <div class="form-section-label" style="margin-top:1.5rem">Additional / Manual Line Items</div>
+    <p class="text-muted" style="font-size:12px;margin-bottom:.75rem">Custom items, allowances, or additional scope. Toggle client-facing or internal-only.</p>
+    <div id="manual-items-wrap">${_renderManualItems()}</div>
+    <button class="btn btn-sm btn-secondary" id="add-manual-btn" style="margin-bottom:1rem">+ Add Line Item</button>
+
     <div class="form-section-label" style="margin-top:1.5rem">Subcontractor / Third-Party Maintenance</div>
     <p class="text-muted" style="font-size:12px;margin-bottom:.75rem">
       Enter your subcontractor cost and markup. The marked-up sell price rolls into the proposal total.
@@ -596,8 +648,18 @@ async function _step3(el, wiz) {
     _refreshTotals();
   };
 
+  document.getElementById('add-manual-btn').onclick = () => {
+    _saveNormTable();
+    if (!S.manualItems) S.manualItems = [];
+    S.manualItems.push({ description: '', qty: 1, value: 0, notes: '', include: true, client_facing: true });
+    document.getElementById('manual-items-wrap').innerHTML = _renderManualItems();
+    _bindManualItems();
+    _refreshTotals();
+  };
+
   _bindNormTable();
   _bindSubSlots();
+  _bindManualItems();
 }
 
 // ─── Equipment pricing table ──────────────────────────────────────────────────
@@ -619,15 +681,26 @@ function _normalizeItem(raw) {
       qtrHrs = partial.quarterly_hours||1; annHrs = partial.annual_hours||4; conf = 'review';
     }
   }
-  const n = { ...raw, equipmaster, conf, category, qtrHrs, annHrs, frequency: S.frequency };
+  const annCleanHrs = match ? (match.annual_hours || 0) : (qtrHrs * 2);
+  const n = { ...raw, equipmaster, conf, category, qtrHrs, annHrs, annCleanHrs, frequency: S.frequency,
+    manufacturer: raw.manufacturer || '', model: raw.model || '' };
   n.annual_price = _calcPrice(n);
   return n;
 }
 
 function _calcPrice(n) {
-  const freqObj    = CONFIG.FREQUENCIES.find(f => f.value === n.frequency) || { visits: 4 };
-  const hrsPerVisit = n.frequency === 'annual' ? n.annHrs : n.frequency === 'semi-annual' ? (n.annHrs/2) : n.qtrHrs;
-  const totalHrs   = hrsPerVisit * freqObj.visits * (n.qty || 1);
+  const freq    = n.frequency || S.frequency || 'quarterly';
+  const visits  = { quarterly: 3, 'semi-annual': 2, monthly: 12, annual: 1 }[freq] || 3;
+  const qty     = Number(n.qty) || 1;
+  const qh      = Number(n.qtrHrs)      || 0;
+  const clean   = Number(n.annCleanHrs) || 0;
+  // Core formula: (quarterly_hrs × visits × qty) + (annual_cleaning_hrs × qty)
+  let totalHrs;
+  if (freq === 'quarterly')    totalHrs = (qh * 3 * qty) + (clean * qty);
+  else if (freq === 'semi-annual') totalHrs = (qh * 2 * qty) + (clean * qty);
+  else if (freq === 'monthly') totalHrs = (qh * 12 * qty) + (clean * qty);
+  else if (freq === 'annual')  totalHrs = (Number(n.annHrs) * qty) + (clean * qty);
+  else totalHrs = (qh * visits * qty) + (clean * qty);
   return calcPMSellPrice(totalHrs);
 }
 
@@ -637,48 +710,117 @@ function _renderNormTable() {
   return `<div class="table-scroll">
     <table class="table" id="norm-table">
       <thead><tr>
-        <th>Type</th><th>Matched As</th><th>Conf</th><th>Qty</th>
-        <th>Qtr Hrs</th><th>Ann Hrs</th><th>Annual Price</th><th></th>
+        <th>Type / Make</th><th>Matched As</th><th>Conf</th><th>Qty</th>
+        <th title="Quarterly hours per visit">Qtr Hrs</th>
+        <th title="Annual cleaning hours (from EQUIPMASTER — added once/year)">Ann.Clean Hrs</th>
+        <th>Annual Price</th><th></th>
       </tr></thead>
-      <tbody>${S.normalized.map((n,i) => `<tr class="${n.conf==='unknown'?'row-review':''}">
-        <td style="font-size:12px">${n.type}${n.tag?' <span class="text-muted">('+n.tag+')</span>':''}</td>
+      <tbody>${S.normalized.map((n,i) => {
+        const stdMatch = findEquipType(n.equipmaster||n.type);
+        const stdClean = stdMatch ? (stdMatch.annual_hours||0) : 0;
+        const isCleanOvr = Number(n.annCleanHrs) !== stdClean;
+        return `<tr class="${n.conf==='unknown'?'row-review':''}">
+        <td style="font-size:12px">
+          <div>${n.type}${n.tag?' <span class="text-muted">('+n.tag+')</span>':''}</div>
+          ${n.manufacturer||n.model ? `<div style="font-size:11px;color:var(--text-dim)">${[n.manufacturer,n.model].filter(Boolean).join(' ')}</div>` : ''}
+          <div style="display:flex;gap:4px;margin-top:3px">
+            <input class="norm-make input input-sm" data-i="${i}" placeholder="Make" value="${n.manufacturer||''}" style="width:80px;font-size:11px">
+            <input class="norm-model input input-sm" data-i="${i}" placeholder="Model" value="${n.model||''}" style="width:80px;font-size:11px">
+          </div>
+        </td>
         <td><input class="norm-match-inp input" data-i="${i}" style="font-size:12px;width:160px" list="wiz-norm-dl" autocomplete="off" value="${n.equipmaster||''}" placeholder="${n.conf==='unknown'?'⚠ Select type':n.equipmaster||''}"></td>
         <td>${confBadge(n.conf)}</td>
         <td><input class="norm-inp input" type="number" data-i="${i}" data-f="qty" value="${n.qty||1}" min="1" style="width:50px"></td>
-        <td><input class="norm-inp input" type="number" step="0.25" data-i="${i}" data-f="qtrHrs" value="${n.qtrHrs||''}" style="width:55px"></td>
-        <td><input class="norm-inp input" type="number" step="0.25" data-i="${i}" data-f="annHrs" value="${n.annHrs||''}" style="width:55px"></td>
+        <td>
+          <input class="norm-inp input" type="number" step="0.25" data-i="${i}" data-f="qtrHrs" value="${n.qtrHrs||''}" style="width:55px" title="Std: ${stdMatch?.quarterly_hours||'?'} hrs/visit">
+        </td>
+        <td>
+          <input class="norm-inp input" type="number" step="0.25" data-i="${i}" data-f="annCleanHrs" value="${n.annCleanHrs!=null?n.annCleanHrs:stdClean}" style="width:62px;${isCleanOvr?'border-color:var(--orange);':''}" title="Std from EQUIPMASTER: ${stdClean} hrs/yr — toggles annual cleaning visit">
+          ${stdClean ? `<div style="font-size:10px;color:var(--text-muted)">std:${stdClean}</div>` : ''}
+        </td>
         <td><input class="norm-price input" type="number" step="1" data-i="${i}" value="${(n.annual_price||0).toFixed(0)}" style="width:80px"></td>
-        <td><button class="btn btn-xs btn-danger norm-del" data-i="${i}">✕</button></td>
-      </tr>`).join('')}</tbody>
+        <td>
+          <button class="btn btn-xs btn-ghost norm-reset" data-i="${i}" title="Reset to EQUIPMASTER standard">↺</button>
+          <button class="btn btn-xs btn-danger norm-del" data-i="${i}">✕</button>
+        </td>
+      </tr>`;}).join('')}</tbody>
     </table>
     <datalist id="wiz-norm-dl">${(EQUIPMASTER||[]).map(e => `<option value="${e.equipment_type}">${e.equipment_type} (${e.category})</option>`).join('')}</datalist>
   </div>`;
 }
 
 function _bindNormTable() {
+  const rerender = () => {
+    _saveNormTable();
+    document.getElementById('norm-table-wrap').innerHTML = _renderNormTable();
+    _bindNormTable();
+    _refreshTotals();
+  };
+
   document.querySelectorAll('.norm-del').forEach(btn => {
-    btn.onclick = () => {
-      _saveNormTable();
-      S.normalized.splice(Number(btn.dataset.i), 1);
-      document.getElementById('norm-table-wrap').innerHTML = _renderNormTable();
-      _bindNormTable();
-      _refreshTotals();
-    };
+    btn.onclick = () => { _saveNormTable(); S.normalized.splice(Number(btn.dataset.i), 1); rerender(); };
   });
-  document.querySelectorAll('.norm-match-inp').forEach(inp => {
-    inp.addEventListener('change', () => {
-      const i = Number(inp.dataset.i);
-      _saveNormTable();
-      const match = findEquipType(inp.value);
+
+  // Reset row to EQUIPMASTER standard
+  document.querySelectorAll('.norm-reset').forEach(btn => {
+    btn.onclick = () => {
+      const i = Number(btn.dataset.i); _saveNormTable();
+      const match = findEquipType(S.normalized[i].equipmaster || S.normalized[i].type);
       if (match) {
-        Object.assign(S.normalized[i], { equipmaster: match.equipment_type, category: match.category||'', qtrHrs: match.quarterly_hours||1, annHrs: match.annual_hours||4, conf: 'strong' });
+        S.normalized[i].qtrHrs      = match.quarterly_hours || 1;
+        S.normalized[i].annCleanHrs = match.annual_hours    || 0;
+        S.normalized[i].annHrs      = match.annual_hours    || 4;
         S.normalized[i].annual_price = _calcPrice(S.normalized[i]);
       }
-      document.getElementById('norm-table-wrap').innerHTML = _renderNormTable();
-      _bindNormTable();
-      _refreshTotals();
+      rerender();
+    };
+  });
+
+  // Type change: re-match and update hours + scope
+  document.querySelectorAll('.norm-match-inp').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const i = Number(inp.dataset.i); _saveNormTable();
+      const match = findEquipType(inp.value);
+      if (match) {
+        Object.assign(S.normalized[i], {
+          equipmaster:  match.equipment_type,
+          category:     match.category || '',
+          qtrHrs:       match.quarterly_hours || 1,
+          annHrs:       match.annual_hours    || 4,
+          annCleanHrs:  match.annual_hours    || 0,
+          conf:         'strong',
+        });
+        S.normalized[i].annual_price = _calcPrice(S.normalized[i]);
+      }
+      rerender();
     });
   });
+
+  // Live recalc on hours/qty change
+  document.querySelectorAll('.norm-inp').forEach(inp => {
+    inp.oninput = () => {
+      const i = Number(inp.dataset.i); const f = inp.dataset.f;
+      if (!S.normalized[i]) return;
+      S.normalized[i][f] = ['qty','qtrHrs','annHrs','annCleanHrs'].includes(f) ? Number(inp.value)||0 : inp.value;
+      // Recalculate price immediately
+      if (['qty','qtrHrs','annHrs','annCleanHrs'].includes(f)) {
+        S.normalized[i].annual_price = _calcPrice(S.normalized[i]);
+        // Update price input in same row without full rerender
+        const priceInp = document.querySelector(`.norm-price[data-i="${i}"]`);
+        if (priceInp) priceInp.value = S.normalized[i].annual_price.toFixed(0);
+        _refreshTotals();
+      }
+    };
+  });
+
+  // Make/model fields
+  document.querySelectorAll('.norm-make').forEach(inp => {
+    inp.oninput = () => { const i = Number(inp.dataset.i); if (S.normalized[i]) S.normalized[i].manufacturer = inp.value; };
+  });
+  document.querySelectorAll('.norm-model').forEach(inp => {
+    inp.oninput = () => { const i = Number(inp.dataset.i); if (S.normalized[i]) S.normalized[i].model = inp.value; };
+  });
+
   document.querySelectorAll('.norm-price').forEach(inp => {
     inp.oninput = () => { S.normalized[Number(inp.dataset.i)].annual_price = Number(inp.value)||0; _refreshTotals(); };
   });
@@ -687,11 +829,65 @@ function _bindNormTable() {
 function _saveNormTable() {
   document.querySelectorAll('.norm-inp').forEach(inp => {
     const i = Number(inp.dataset.i), f = inp.dataset.f;
-    if (S.normalized[i]) S.normalized[i][f] = ['qty','qtrHrs','annHrs'].includes(f) ? Number(inp.value)||0 : inp.value;
+    if (S.normalized[i]) S.normalized[i][f] = ['qty','qtrHrs','annHrs','annCleanHrs'].includes(f) ? Number(inp.value)||0 : inp.value;
   });
   document.querySelectorAll('.norm-price').forEach(inp => {
     if (S.normalized[Number(inp.dataset.i)]) S.normalized[Number(inp.dataset.i)].annual_price = Number(inp.value)||0;
   });
+  document.querySelectorAll('.norm-make').forEach(inp => {
+    if (S.normalized[Number(inp.dataset.i)]) S.normalized[Number(inp.dataset.i)].manufacturer = inp.value;
+  });
+  document.querySelectorAll('.norm-model').forEach(inp => {
+    if (S.normalized[Number(inp.dataset.i)]) S.normalized[Number(inp.dataset.i)].model = inp.value;
+  });
+}
+
+
+// ─── Manual line items ────────────────────────────────────────────────────────
+function _renderManualItems() {
+  if (!S.manualItems?.length) return `<p class="text-muted" style="font-size:12px">No additional line items.</p>`;
+  return `<div class="table-scroll"><table class="table"><thead><tr>
+    <th>Description</th><th style="width:50px">Qty</th><th style="width:80px">Value/yr</th>
+    <th>Notes</th><th style="width:80px">Include</th><th style="width:90px">Client-Facing</th><th style="width:32px"></th>
+  </tr></thead><tbody>
+    ${S.manualItems.map((m,i) => `<tr>
+      <td><input class="mi-inp input input-sm" data-mi="${i}" data-mf="description" value="${m.description||''}" placeholder="e.g. Nitrogen, Consumables allowance"></td>
+      <td><input class="mi-inp input input-sm" data-mi="${i}" data-mf="qty" type="number" min="1" value="${m.qty||1}" style="width:48px"></td>
+      <td><input class="mi-inp input input-sm" data-mi="${i}" data-mf="value" type="number" min="0" step="10" value="${m.value||0}" style="width:76px"></td>
+      <td><input class="mi-inp input input-sm" data-mi="${i}" data-mf="notes" value="${m.notes||''}" placeholder="Internal notes"></td>
+      <td style="text-align:center"><input type="checkbox" class="mi-chk" data-mi="${i}" data-mf="include" ${m.include!==false?'checked':''}></td>
+      <td style="text-align:center"><input type="checkbox" class="mi-chk" data-mi="${i}" data-mf="client_facing" ${m.client_facing?'checked':''}></td>
+      <td><button class="btn btn-xs btn-danger mi-del" data-mi="${i}">✕</button></td>
+    </tr>`).join('')}
+  </tbody></table></div>`;
+}
+
+function _bindManualItems() {
+  document.querySelectorAll('.mi-del').forEach(btn => {
+    btn.onclick = () => {
+      S.manualItems.splice(Number(btn.dataset.mi), 1);
+      document.getElementById('manual-items-wrap').innerHTML = _renderManualItems();
+      _bindManualItems(); _refreshTotals();
+    };
+  });
+  document.querySelectorAll('.mi-inp').forEach(inp => {
+    inp.oninput = () => {
+      const i = Number(inp.dataset.mi), f = inp.dataset.mf;
+      if (!S.manualItems[i]) return;
+      S.manualItems[i][f] = f === 'qty' || f === 'value' ? Number(inp.value)||0 : inp.value;
+      if (f === 'value' || f === 'qty') _refreshTotals();
+    };
+  });
+  document.querySelectorAll('.mi-chk').forEach(chk => {
+    chk.onchange = () => {
+      const i = Number(chk.dataset.mi), f = chk.dataset.mf;
+      if (S.manualItems[i]) { S.manualItems[i][f] = chk.checked; if (f === 'include') _refreshTotals(); }
+    };
+  });
+}
+
+function _manualTotal() {
+  return (S.manualItems||[]).filter(m => m.include !== false).reduce((s,m) => s + (Number(m.value)||0) * (Number(m.qty)||1), 0);
 }
 
 // ─── Subcontractor slots ──────────────────────────────────────────────────────
@@ -755,7 +951,7 @@ function _subTotal() {
 }
 
 function _equipTotal() {
-  return S.normalized.reduce((s,n) => s + Number(n.annual_price||0), 0);
+  return S.normalized.reduce((s,n) => s + Number(n.annual_price||0), 0) + _manualTotal();
 }
 
 function _renderPricingTotals() {
@@ -870,6 +1066,25 @@ async function _step4(el, wiz) {
   });
 }
 
+
+function _confirmDiscard() {
+  return new Promise(res => {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:2000;display:flex;align-items:center;justify-content:center';
+    d.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:24px 28px;max-width:360px;text-align:center">
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px">Discard draft?</div>
+      <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:16px">Your unsaved proposal data will be lost.</div>
+      <div style="display:flex;gap:8px;justify-content:center">
+        <button id="dc-cancel" class="btn btn-secondary">Keep editing</button>
+        <button id="dc-ok" class="btn btn-danger">Discard</button>
+      </div>
+    </div>`;
+    document.body.appendChild(d);
+    d.querySelector('#dc-cancel').onclick = () => { d.remove(); res(false); };
+    d.querySelector('#dc-ok').onclick     = () => { d.remove(); res(true); };
+  });
+}
+
 function _buildDefaultTitle() {
   const freqObj = CONFIG.FREQUENCIES.find(f => f.value === S.frequency);
   const freq = freqObj ? freqObj.label : S.frequency;
@@ -912,6 +1127,12 @@ async function _saveProposal(exportPdf) {
     qty:            Number(n.qty) || 1,
     category:       n.category || 'Other',
     confidence:     n.conf,
+    manufacturer:   n.manufacturer || '',
+    model:          n.model        || '',
+    make:           n.manufacturer || '',
+    qtrHrs:         Number(n.qtrHrs)      || 0,
+    annCleanHrs:    Number(n.annCleanHrs) || 0,
+    service_area:   n.service_area || 'common_strata',
     scope_lines: (() => {
       const lines = getScopeText(n.equipmaster || n.type, n.frequency || S.frequency);
       if (lines && lines.length) return lines;
@@ -949,6 +1170,7 @@ async function _saveProposal(exportPdf) {
     monthly_value:       annual / 12,
     payment_terms:       S.paymentTerms || 'Net 30',
     scope_items:         [...scopeItems, ...subScopeItems],
+    manual_items:        (S.manualItems||[]).filter(m=>m.include!==false),
     notes:               S.notes,
     subcontractor_items: subcontractorItems,   // internal — not shown on PDF
     cover_image_url:     null,
@@ -1014,5 +1236,6 @@ async function _saveProposal(exportPdf) {
     }
   }
 
+  _clearDraft();
   navigate(`/proposals/${saved.id}`);
 }
