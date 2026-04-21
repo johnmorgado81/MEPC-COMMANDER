@@ -40,6 +40,8 @@ const S = {
   rawEquipment: [],
   normalized: [],
   frequency: 'quarterly',
+  quarterVisits: { q1:true, q2:true, q3:true, q4:true, annual_clean:false },
+  serviceAreaType: 'shared',
 
   // Subcontractor slots: key → { sub_cost, markup_pct }
   subSlots: {},
@@ -83,8 +85,10 @@ function resetState() {
       building_type: '', building_notes: '',
     },
     rawEquipment: [], normalized: [], frequency: 'quarterly',
+    quarterVisits: { q1:true, q2:true, q3:true, q4:true, annual_clean:false },
+    serviceAreaType: 'shared',
     subSlots: {}, title: '', notes: '', paymentTerms: 'Net 30',
-    coverImageDataUrl: null, rfpScope: [],
+    coverImageDataUrl: null, rfpScope: [], manualItems: [], _dirty: false,
   });
 }
 
@@ -596,11 +600,26 @@ async function _step3(el, wiz) {
   el.innerHTML = `<div class="wiz-card">
     <h3>Pricing</h3>
 
-    <div class="form-row" style="align-items:center;margin-bottom:1rem">
-      <div class="form-group">
-        <label>Service Frequency</label>
-        <select id="wiz-freq" class="input">
-          ${CONFIG.FREQUENCIES.filter(f => f.value !== 'custom').map(f => `<option value="${f.value}" ${S.frequency===f.value?'selected':''}>${f.label}</option>`).join('')}
+    <div style="margin-bottom:1rem;display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+      <div>
+        <div style="font-family:var(--font-cond);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:8px">Service Visits</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          ${['q1','q2','q3','q4'].map(q => `<label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;font-weight:500">
+            <input type="checkbox" class="wiz-q-chk" id="wiz-${q}" data-q="${q}" ${S.quarterVisits[q]?'checked':''}> ${q.toUpperCase()}
+          </label>`).join('')}
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;font-weight:500;margin-left:8px;padding-left:8px;border-left:1px solid var(--border)">
+            <input type="checkbox" class="wiz-q-chk" id="wiz-annual-clean" data-q="annual_clean" ${S.quarterVisits.annual_clean?'checked':''}> Ann. Cleaning
+          </label>
+        </div>
+        <div id="wiz-visit-summary" style="font-size:11.5px;color:var(--text-dim);margin-top:5px"></div>
+      </div>
+      <div>
+        <div style="font-family:var(--font-cond);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:8px">Service Area Type</div>
+        <select id="wiz-area-type" class="input input-sm" style="min-width:220px">
+          <option value="shared"       ${S.serviceAreaType==='shared'?'selected':''}>Shared Residential/Commercial</option>
+          <option value="commercial"   ${S.serviceAreaType==='commercial'?'selected':''}>Commercial Common Areas</option>
+          <option value="residential"  ${S.serviceAreaType==='residential'?'selected':''}>Residential Common Areas</option>
+          <option value="mixed"        ${S.serviceAreaType==='mixed'?'selected':''}>Mixed (separate breakdowns)</option>
         </select>
       </div>
       <div style="padding-top:1.5rem">
@@ -634,13 +653,26 @@ async function _step3(el, wiz) {
   document.getElementById('s3-back').onclick = () => { _saveNormTable(); _saveSubSlots(); wiz.back(); };
   document.getElementById('s3-next').onclick = () => { _saveNormTable(); _saveSubSlots(); wiz.next(); };
 
-  document.getElementById('wiz-freq').onchange = e => {
-    S.frequency = e.target.value;
-    S.normalized.forEach(n => { n.frequency = S.frequency; n.annual_price = _calcPrice(n); });
-    document.getElementById('norm-table-wrap').innerHTML = _renderNormTable();
-    _bindNormTable();
-    _refreshTotals();
-  };
+  // Frequency now driven by Q1-Q4 checkboxes above
+
+  // Update visit summary on load
+  _updateVisitSummary();
+
+  // Q checkboxes
+  document.querySelectorAll('.wiz-q-chk').forEach(chk => {
+    chk.onchange = () => {
+      S.quarterVisits[chk.dataset.q] = chk.checked;
+      S.frequency = _deriveFrequency();
+      _updateVisitSummary();
+      _saveNormTable();
+      S.normalized.forEach(n => { n.frequency = S.frequency; n.annual_price = _calcPrice(n); });
+      document.getElementById('norm-table-wrap').innerHTML = _renderNormTable();
+      _bindNormTable();
+      _refreshTotals();
+    };
+  });
+
+  document.getElementById('wiz-area-type').onchange = e => { S.serviceAreaType = e.target.value; };
 
   document.getElementById('recalc-btn').onclick = () => {
     _saveNormTable();
@@ -698,12 +730,38 @@ function _calcPrice(n) {
   const clean   = Number(n.annCleanHrs) || 0;
   // Core formula: (quarterly_hrs × visits × qty) + (annual_cleaning_hrs × qty)
   let totalHrs;
-  if (freq === 'quarterly')    totalHrs = (qh * 3 * qty) + (clean * qty);
-  else if (freq === 'semi-annual') totalHrs = (qh * 2 * qty) + (clean * qty);
-  else if (freq === 'monthly') totalHrs = (qh * 12 * qty) + (clean * qty);
-  else if (freq === 'annual')  totalHrs = (Number(n.annHrs) * qty) + (clean * qty);
-  else totalHrs = (qh * visits * qty) + (clean * qty);
+  // Use explicit visit count from quarter checkboxes when available
+  const visitCount = (S && S.quarterVisits) ? _deriveVisitCount() : visits;
+  const annClean   = (S && S.quarterVisits?.annual_clean) || n.annCleanEnabled;
+  const cleanHrs   = annClean ? clean : 0;
+  if (freq === 'monthly') totalHrs = (qh * 12 * qty) + (cleanHrs * qty);
+  else totalHrs = (qh * visitCount * qty) + (cleanHrs * qty);
   return calcPMSellPrice(totalHrs);
+}
+
+
+// ─── Quarter visit helpers ─────────────────────────────────────────────────────
+function _deriveFrequency() {
+  const v = S.quarterVisits;
+  const count = [v.q1,v.q2,v.q3,v.q4].filter(Boolean).length;
+  if (count === 4) return 'quarterly';
+  if (count === 2) return 'semi-annual';
+  if (count === 1) return 'annual';
+  if (count === 3) return 'quarterly'; // 3-quarter = near-quarterly
+  return 'quarterly';
+}
+
+function _deriveVisitCount() {
+  return [S.quarterVisits.q1, S.quarterVisits.q2, S.quarterVisits.q3, S.quarterVisits.q4].filter(Boolean).length;
+}
+
+function _updateVisitSummary() {
+  const el = document.getElementById('wiz-visit-summary');
+  if (!el) return;
+  const count = _deriveVisitCount();
+  const labels = ['Q1','Q2','Q3','Q4'].filter((_,i) => S.quarterVisits[['q1','q2','q3','q4'][i]]);
+  const clean = S.quarterVisits.annual_clean ? ' + Annual Cleaning' : '';
+  el.textContent = `${count} visit${count!==1?'s':''}/yr (${labels.join(', ')})${clean}`;
 }
 
 function _renderNormTable() {
@@ -1167,6 +1225,8 @@ async function _saveProposal(exportPdf) {
     created_date:        today(),
     valid_until:         addDays(today(), CONFIG.PROPOSAL_VALID_DAYS),
     frequency:           S.frequency,
+    quarter_visits:      S.quarterVisits,
+    service_area_type:   S.serviceAreaType,
     visits_per_year:     freqObj.visits,
     annual_value:        annual,
     monthly_value:       annual / 12,

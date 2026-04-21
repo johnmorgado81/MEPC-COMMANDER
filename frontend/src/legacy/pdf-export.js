@@ -1,585 +1,508 @@
-// js/utils/pdf-export.js — jsPDF document generation helpers
 import { CONFIG } from './config.js';
 import { formatCurrency, formatDate } from './helpers.js';
 
-function getjsPDF() {
-  const { jsPDF } = window.jspdf;
-  return jsPDF;
+function getjsPDF() { return window.jspdf.jsPDF; }
+
+// ─── Shared helpers ────────────────────────────────────────────────────────────
+function getCompany() {
+  return { ...CONFIG.COMPANY };
 }
 
-// ── Shared header / footer ─────────────────────────────────
-function addHeader(doc, title, subtitle = '') {
-  const co = CONFIG.COMPANY;
-  doc.setFillColor(24, 33, 47);
-  doc.rect(0, 0, 215.9, 22, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
-  doc.text(co.name, 12, 12);
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`${co.phone}  |  ${co.email}  |  ${co.website}`, 12, 18);
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.text(title, 215.9 - 12, 12, { align: 'right' });
-  if (subtitle) {
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.text(subtitle, 215.9 - 12, 18, { align: 'right' });
-  }
-  doc.setTextColor(0);
-  return 28; // y after header
-}
-
-function addFooter(doc, pageCount) {
-  const co = CONFIG.COMPANY;
-  doc.setFontSize(8);
-  doc.setTextColor(120);
-  doc.text(`${co.name}  |  ${co.address}, ${co.city}, ${co.province}  |  GST ${co.gst}`, 12, 287);
-  doc.text(`Page ${pageCount}`, 215.9 - 12, 287, { align: 'right' });
+function addFooter(doc, page, proposal) {
+  const co = getCompany();
+  doc.setFontSize(7.5); doc.setTextColor(140);
+  doc.text(`${co.name}  |  ${co.address}, ${co.city}, ${co.province}  |  ${co.phone}`, 14, 285);
+  if (proposal?.proposal_number) doc.text(`Proposal #${proposal.proposal_number}  |  Page ${page}`, 215.9 - 14, 285, { align:'right' });
   doc.setTextColor(0);
 }
 
-// ── PM Proposal PDF ────────────────────────────────────────
-export function generateProposalPDF(proposal, building) {
-  const jsPDF = getjsPDF();
-  const doc = new jsPDF({ unit: 'mm', format: 'letter' });
-  const co = CONFIG.COMPANY;
-  let y = addHeader(doc, 'PREVENTIVE MAINTENANCE PROPOSAL', `#${proposal.proposal_number}`);
-
-  // Client block
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Prepared For:', 12, y);
-  doc.setFont('helvetica', 'normal');
-  y += 5;
-  doc.text(building.client_name || building.name, 12, y); y += 5;
-  if (building.client_company) { doc.text(building.client_company, 12, y); y += 5; }
-  doc.text(building.address || '', 12, y); y += 5;
-  if (building.client_email) doc.text(building.client_email, 12, y);
-
-  // Proposal info block (right side)
-  const infoY = 28;
-  doc.setFont('helvetica', 'bold');
-  doc.text('Proposal Details', 215.9 - 70, infoY);
-  const details = [
-    ['Date:', formatDate(proposal.created_date)],
-    ['Valid Until:', formatDate(proposal.valid_until)],
-    ['Frequency:', proposal.frequency],
-    ['Visits/Year:', String(proposal.visits_per_year || '')],
-    ['Annual Value:', formatCurrency(proposal.annual_value)],
-  ];
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  details.forEach(([k, v], i) => {
-    doc.setFont('helvetica', 'bold');
-    doc.text(k, 215.9 - 70, infoY + 6 + i * 5);
-    doc.setFont('helvetica', 'normal');
-    doc.text(v, 215.9 - 35, infoY + 6 + i * 5);
-  });
-
-  y += 10;
-  doc.setDrawColor(200); doc.line(12, y, 203.9, y); y += 6;
-
-  // Scope of work
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Scope of Work', 12, y); y += 6;
-
-  const items = proposal.scope_items || [];
-  items.forEach((item, idx) => {
-    if (y > 250) { doc.addPage(); y = addHeader(doc, 'SCOPE OF WORK (cont.)', `#${proposal.proposal_number}`); addFooter(doc, doc.getNumberOfPages()); }
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.setFillColor(240, 244, 255);
-    doc.rect(12, y - 4, 191.9, 7, 'F');
-    doc.text(`${item.tag ? item.tag + '  — ' : ''}${item.equipment_type}${item.qty > 1 ? ' ×' + item.qty : ''}`, 14, y);
-    y += 5;
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8.5);
-    const scope = item.scope_lines || [];
-    scope.forEach(line => {
-      if (y > 255) { doc.addPage(); y = 20; }
-      const wrapped = doc.splitTextToSize(`• ${line}`, 185);
-      doc.text(wrapped, 16, y);
-      y += wrapped.length * 4.5;
-    });
-    y += 3;
-  });
-
-  // Totals
-  if (y > 240) { doc.addPage(); y = 20; }
-  doc.setDrawColor(200); doc.line(12, y, 203.9, y); y += 6;
-  doc.setFontSize(10);
-  const monthly = proposal.monthly_value || (proposal.annual_value / 12);
-  const tax = proposal.annual_value * CONFIG.TAX_RATE;
-  const totRows = [
-    ['Subtotal (Annual)', formatCurrency(proposal.annual_value)],
-    [`GST (${(CONFIG.TAX_RATE * 100).toFixed(0)}%)`, formatCurrency(tax)],
-    ['Total (Annual)', formatCurrency(Number(proposal.annual_value) + tax)],
-    ['Monthly Billing', formatCurrency(monthly)],
-  ];
-  totRows.forEach(([l, v], i) => {
-    const isBold = i === totRows.length - 2 || i === totRows.length - 1;
-    doc.setFont('helvetica', isBold ? 'bold' : 'normal');
-    doc.text(l, 130, y);
-    doc.text(v, 203.9, y, { align: 'right' });
-    y += 6;
-  });
-
-  // Terms
-  y += 5;
-  if (y > 240) { doc.addPage(); y = 20; }
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.text('Terms & Conditions', 12, y); y += 5;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  const terms = proposal.terms_text || defaultTerms();
-  const termLines = doc.splitTextToSize(terms, 191.9);
-  if (y + termLines.length * 4.5 > 270) { doc.addPage(); y = 20; }
-  doc.text(termLines, 12, y);
-  y += termLines.length * 4.5 + 10;
-
-  // Signature block
-  if (y > 240) { doc.addPage(); y = 20; }
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.text('Acceptance', 12, y); y += 6;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.text('By signing below the client accepts the terms of this proposal.', 12, y); y += 10;
-  doc.line(12, y, 80, y);
-  doc.line(100, y, 168, y);
-  doc.line(175, y, 203.9, y);
-  y += 4;
-  doc.setFontSize(8);
-  doc.text('Authorized Signature', 12, y);
-  doc.text('Print Name / Title', 100, y);
-  doc.text('Date', 175, y);
-
-  // Footer on all pages
-  const pageCount = doc.getNumberOfPages();
-  for (let p = 1; p <= pageCount; p++) { doc.setPage(p); addFooter(doc, p); }
-
-  doc.save(`Proposal-${proposal.proposal_number}.pdf`);
+function addHeader(doc, title, sub = '') {
+  const co = getCompany();
+  doc.setFillColor(15, 25, 45); doc.rect(0, 0, 215.9, 20, 'F');
+  doc.setFillColor(59, 130, 246); doc.rect(0, 20, 215.9, 2, 'F');
+  doc.setTextColor(255, 255, 255); doc.setFont('helvetica','bold'); doc.setFontSize(12);
+  doc.text(co.name, 14, 13);
+  doc.setFont('helvetica','normal'); doc.setFontSize(8);
+  doc.text(`${co.phone}  ·  ${co.email}  ·  ${co.website}`, 14, 18);
+  doc.setFont('helvetica','bold'); doc.setFontSize(10);
+  doc.text(title, 215.9-14, 12, { align:'right' });
+  if (sub) { doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.text(sub, 215.9-14, 18, { align:'right' }); }
+  doc.setTextColor(0);
+  return 28;
 }
 
-// ── Quote PDF ──────────────────────────────────────────────
-export function generateQuotePDF(quote, building) {
-  const jsPDF = getjsPDF();
-  const doc = new jsPDF({ unit: 'mm', format: 'letter' });
-  let y = addHeader(doc, 'QUOTATION', `#${quote.quote_number}`);
-
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Prepared For:', 12, y); y += 5;
-  doc.setFont('helvetica', 'normal');
-  doc.text(building.client_name || building.name, 12, y); y += 5;
-  doc.text(building.address || '', 12, y); y += 8;
-
-  // Details
-  doc.setFont('helvetica', 'bold');
-  doc.text(`Quote #: ${quote.quote_number}`, 215.9 - 12, 28, { align: 'right' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.text(`Date: ${formatDate(quote.created_date)}`, 215.9 - 12, 34, { align: 'right' });
-  doc.text(`Valid: ${formatDate(quote.valid_until)}`, 215.9 - 12, 39, { align: 'right' });
-  doc.text(`Terms: ${quote.payment_terms || 'Net 30'}`, 215.9 - 12, 44, { align: 'right' });
-
-  doc.setDrawColor(200); doc.line(12, y, 203.9, y); y += 5;
-
-  if (quote.title) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.text(quote.title, 12, y); y += 7;
-  }
-
-  // Line items table header
-  doc.setFillColor(24, 33, 47);
-  doc.setTextColor(255);
-  doc.rect(12, y - 4, 191.9, 7, 'F');
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Description', 14, y);
-  doc.text('Qty', 140, y, { align: 'right' });
-  doc.text('Unit Price', 165, y, { align: 'right' });
-  doc.text('Total', 203.9, y, { align: 'right' });
-  doc.setTextColor(0); y += 6;
-
-  const items = quote.line_items || [];
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  items.forEach((item, i) => {
-    if (y > 250) { doc.addPage(); y = 20; }
-    doc.setFillColor(i % 2 === 0 ? 248 : 255, i % 2 === 0 ? 250 : 255, 252);
-    doc.rect(12, y - 4, 191.9, 7, 'F');
-    const descWrapped = doc.splitTextToSize(item.description || '', 115);
-    doc.text(descWrapped, 14, y);
-    doc.text(String(item.qty || 1), 140, y, { align: 'right' });
-    doc.text(formatCurrency(item.unit_price), 165, y, { align: 'right' });
-    doc.text(formatCurrency(item.total), 203.9, y, { align: 'right' });
-    y += Math.max(7, descWrapped.length * 4.5);
-  });
-
-  y += 3;
-  doc.setDrawColor(200); doc.line(130, y, 203.9, y); y += 4;
-
-  [
-    ['Subtotal', formatCurrency(quote.subtotal)],
-    [`GST (${(quote.tax_rate * 100 || 5).toFixed(0)}%)`, formatCurrency(quote.tax_amount)],
-    ['TOTAL', formatCurrency(quote.total)],
-  ].forEach(([l, v], i) => {
-    doc.setFont('helvetica', i === 2 ? 'bold' : 'normal');
-    doc.setFontSize(i === 2 ? 11 : 9);
-    doc.text(l, 165, y, { align: 'right' });
-    doc.text(v, 203.9, y, { align: 'right' });
-    y += 6;
-  });
-
-  if (quote.notes) {
-    y += 5;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
-    doc.text('Notes:', 12, y); y += 5;
-    doc.setFont('helvetica', 'normal');
-    const nl = doc.splitTextToSize(quote.notes, 191.9);
-    doc.text(nl, 12, y);
-  }
-
-  const pageCount = doc.getNumberOfPages();
-  for (let p = 1; p <= pageCount; p++) { doc.setPage(p); addFooter(doc, p); }
-  doc.save(`Quote-${quote.quote_number}.pdf`);
+function checkPage(doc, y, need, page, proposal) {
+  if (y + need > 272) { addFooter(doc, page.n, proposal); doc.addPage(); page.n++; y = addHeader(doc, 'PREVENTIVE MAINTENANCE PROPOSAL', `#${proposal?.proposal_number||'DRAFT'}`); }
+  return y;
 }
 
-function defaultTerms() {
-  return `This proposal is valid for ${CONFIG.PROPOSAL_VALID_DAYS} days from the date of issue. ` +
-    `All preventive maintenance services are performed during regular business hours (Monday–Friday, 7:30am–4:30pm). ` +
-    `Emergency or after-hours calls are billed separately at applicable rates. ` +
-    `Deficiencies identified during service are not included in the preventive maintenance fee and will be quoted separately for approval. ` +
-    `Payment terms: Net 30 from invoice date. Overdue balances are subject to 2% monthly interest. ` +
-    `All prices are in Canadian Dollars and exclusive of applicable taxes.`;
+function sectionHead(doc, text, y, ml, mr) {
+  doc.setFillColor(15,25,45); doc.rect(ml, y-4, mr-ml, 8, 'F');
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(10);
+  doc.text(text.toUpperCase(), ml+4, y);
+  doc.setTextColor(0);
+  return y + 8;
 }
 
-// ── Enhanced multi-page Proposal PDF (used by proposal-wizard) ─────────────────
+// ─── Main enhanced PDF ─────────────────────────────────────────────────────────
 export function generateProposalPDFEnhanced(proposal, building, coverImageDataUrl) {
   const jsPDF = getjsPDF();
-  const doc   = new jsPDF({ unit: 'mm', format: 'letter' });
-  const co    = CONFIG.COMPANY;
-  const pw    = 215.9, ph = 279.4, ml = 14, mr = pw - ml;
+  const doc   = new jsPDF({ unit:'mm', format:'letter' });
+  const co    = getCompany();
+  const pw    = 215.9, ml = 14, mr = pw - ml;
+  const page  = { n: 1 };
 
-  // ─── COVER PAGE ─────────────────────────────────────────────────────────────
+  const annual   = Number(proposal.annual_value) || 0;
+  const monthly  = Number(proposal.monthly_value) || annual / 12;
+  const showGST  = co.show_gst === true;
+  const tax      = showGST ? annual * (co.tax_rate || CONFIG.TAX_RATE || 0.05) : 0;
+  const items    = proposal.scope_items || [];
+  const manItems = (proposal.manual_items || []).filter(m => m.include !== false && m.client_facing);
+  const freq     = proposal.frequency || 'quarterly';
+  const qv       = proposal.quarter_visits || { q1:true, q2:true, q3:true, q4:true, annual_clean:false };
+  const visitCount = [qv.q1,qv.q2,qv.q3,qv.q4].filter(Boolean).length || 4;
+  const visitLabels = ['Q1','Q2','Q3','Q4'].filter((_,i)=>[qv.q1,qv.q2,qv.q3,qv.q4][i]).join(', ');
+
+  // ── PAGE 1: COVER ──────────────────────────────────────────────────────────
   // Header band
-  doc.setFillColor(15, 25, 45);
-  doc.rect(0, 0, pw, 48, 'F');
-  doc.setFillColor(59, 130, 246);
-  doc.rect(0, 45, pw, 3, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(20); doc.setFont('helvetica', 'bold');
-  doc.text(co.name, ml, 18);
-  doc.setFontSize(9); doc.setFont('helvetica', 'normal');
-  doc.text(`${co.phone}  ·  ${co.email}  ·  ${co.website}`, ml, 27);
-  doc.text(`${co.address}, ${co.city}, ${co.province}  ·  GST ${co.gst}`, ml, 34);
-  doc.setTextColor(0);
+  doc.setFillColor(15,25,45); doc.rect(0, 0, pw, 44, 'F');
+  doc.setFillColor(59,130,246); doc.rect(0, 42, pw, 2, 'F');
 
-  // Cover image — max height 70mm, aspect-ratio preserved, centered
-  let imgBottom = 50;
-  if (coverImageDataUrl) {
+  // Logo if available
+  if (co.logo_data) {
     try {
-      const imgType = coverImageDataUrl.match(/data:image\/(\w+)/)?.[1]?.toUpperCase() || 'JPEG';
-      let imgW = pw, imgH = 70;
-      try {
-        const props = doc.getImageProperties(coverImageDataUrl);
-        const ratio = Math.min(pw / props.width, 70 / props.height);
-        imgW = props.width * ratio;
-        imgH = props.height * ratio;
-      } catch { /* fallback dimensions above */ }
-      const imgX = (pw - imgW) / 2;
-      doc.addImage(coverImageDataUrl, imgType, imgX, 50, imgW, imgH, undefined, 'FAST');
-      imgBottom = 50 + imgH;
-    } catch { imgBottom = 50; }
+      const lt = co.logo_data.match(/data:image\/(\w+)/)?.[1]?.toUpperCase()||'PNG';
+      doc.addImage(co.logo_data, lt, ml, 6, 40, 14, undefined, 'FAST');
+    } catch {}
   }
 
-  // Title band below image
-  const titleY = imgBottom + 6;
-  doc.setFillColor(59, 130, 246);
-  doc.rect(0, titleY - 1, pw, 14, 'F');
   doc.setTextColor(255,255,255);
-  doc.setFont('helvetica','bold'); doc.setFontSize(14);
-  doc.text('PREVENTIVE MAINTENANCE PROPOSAL', ml, titleY + 8);
+  doc.setFont('helvetica','bold'); doc.setFontSize(16);
+  doc.text(co.name, pw-ml, 14, { align:'right' });
+  doc.setFont('helvetica','normal'); doc.setFontSize(8);
+  doc.text(`${co.phone}  ·  ${co.email}  ·  ${co.website}`, pw-ml, 21, { align:'right' });
+  doc.text(`${co.address}, ${co.city}, ${co.province} ${co.postal||''}`, pw-ml, 27, { align:'right' });
   doc.setTextColor(0);
 
-  // Two-column info block: left = client, right = proposal details
-  const infoY = titleY + 20;
-  const halfW = (mr - ml) / 2 - 4;
+  // Cover image
+  const coverImg = coverImageDataUrl || building?.photo_url;
+  let imgBottom = 46;
+  if (coverImg) {
+    try {
+      const it = coverImg.match(/data:image\/(\w+)/)?.[1]?.toUpperCase()||'JPEG';
+      let iw = pw, ih = 68;
+      try {
+        const p = doc.getImageProperties(coverImg);
+        const r = Math.min(pw/p.width, 68/p.height);
+        iw = p.width*r; ih = p.height*r;
+      } catch {}
+      doc.addImage(coverImg, it, (pw-iw)/2, 46, iw, ih, undefined, 'FAST');
+      imgBottom = 46 + ih;
+    } catch {}
+  }
 
-  // Left box — client info
-  doc.setFillColor(245, 248, 255);
-  doc.rect(ml, infoY, halfW, 55, 'F');
-  doc.setDrawColor(200); doc.rect(ml, infoY, halfW, 55);
-  let ly = infoY + 7;
-  doc.setFont('helvetica','bold'); doc.setFontSize(8);
-  doc.setTextColor(80,80,80);
-  doc.text('PREPARED FOR', ml + 4, ly); ly += 6;
+  // Title bar
+  const ty = imgBottom + 2;
+  doc.setFillColor(59,130,246); doc.rect(0, ty, pw, 13, 'F');
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(13);
+  doc.text('PREVENTIVE MAINTENANCE PROPOSAL', ml, ty + 9);
   doc.setTextColor(0);
-  doc.setFont('helvetica','bold'); doc.setFontSize(10);
-  const cliName = building.client_name || building.name || 'To Be Confirmed';
-  doc.text(cliName.slice(0, 32), ml + 4, ly); ly += 6;
+
+  // Two-column info block
+  const iy = ty + 18;
+  const hw = (mr-ml)/2 - 4;
+
+  // Left: prepared for
+  doc.setFillColor(245,248,255); doc.rect(ml, iy, hw, 72, 'F');
+  doc.setDrawColor(210); doc.rect(ml, iy, hw, 72);
+  let ly = iy + 7;
+  doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(100);
+  doc.text('PREPARED FOR', ml+4, ly); ly += 6;
+  doc.setTextColor(0); doc.setFont('helvetica','bold'); doc.setFontSize(11);
+  const cname = (building?.client_name || building?.name || 'To Be Confirmed');
+  const clines = doc.splitTextToSize(cname, hw-8);
+  doc.text(clines, ml+4, ly); ly += clines.length * 6;
   doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
-  if (building.client_company) { doc.text(building.client_company.slice(0,38), ml+4, ly); ly += 5; }
-  if (building.name && building.name !== cliName) { doc.text(building.name.slice(0,38), ml+4, ly); ly += 5; }
-  const addr = [building.address, building.city, building.province].filter(Boolean).join(', ');
-  if (addr) { const aw = doc.splitTextToSize(addr, halfW-8); doc.text(aw[0], ml+4, ly); ly += 5; }
-  if (building.client_email) { doc.text(building.client_email.slice(0,35), ml+4, ly); ly += 5; }
-  if (building.client_phone) { doc.text(building.client_phone, ml+4, ly); }
+  if (building?.client_company) { const cl = doc.splitTextToSize(building.client_company, hw-8); doc.text(cl, ml+4, ly); ly+=cl.length*5; }
+  if (building?.name && building.name !== cname) { const nl = doc.splitTextToSize(building.name, hw-8); doc.text(nl, ml+4, ly); ly+=nl.length*5; }
+  const addr = [building?.address, building?.city, building?.province].filter(Boolean).join(', ');
+  if (addr) { const al = doc.splitTextToSize(addr, hw-8); doc.text(al, ml+4, ly); ly+=5; }
+  if (building?.client_email) { const _el=doc.splitTextToSize(building.client_email,hw-8); doc.text(_el[0],ml+4,ly); ly+=5; }
+  if (building?.client_phone) doc.text(building.client_phone, ml+4, ly);
 
-  // Right box — proposal summary
-  const rx2 = ml + halfW + 8;
-  doc.setFillColor(15, 25, 45);
-  doc.rect(rx2, infoY, halfW, 55, 'F');
-  let ry2 = infoY + 7;
-  doc.setFont('helvetica','bold'); doc.setFontSize(8);
-  doc.setTextColor(160,180,220);
-  doc.text('PROPOSAL DETAILS', rx2 + 4, ry2); ry2 += 6;
-  const annual = Number(proposal.annual_value) || 0;
-  const monthly = Number(proposal.monthly_value) || annual / 12;
+  // Right: proposal details
+  const rx = ml+hw+8;
+  doc.setFillColor(15,25,45); doc.rect(rx, iy, hw, 72, 'F');
+  let ry = iy + 7;
+  doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(130,160,210);
+  doc.text('PROPOSAL DETAILS', rx+4, ry); ry+=6;
   [
-    ['Proposal #', proposal.proposal_number || 'DRAFT'],
-    ['Date',       formatDate(proposal.created_date)],
-    ['Valid Until',formatDate(proposal.valid_until)],
-    ['Frequency',  (proposal.frequency||'').charAt(0).toUpperCase()+(proposal.frequency||'').slice(1)],
+    ['Proposal #', proposal.proposal_number||'DRAFT'],
+    ['Date', formatDate(proposal.created_date)],
+    ['Valid Until', formatDate(proposal.valid_until)],
+    ['Service Visits', `${visitLabels} (${visitCount}/yr)`],
+    qv.annual_clean ? ['Annual Cleaning', 'Included'] : null,
     ['Annual Value', formatCurrency(annual)],
-    ['Monthly',    formatCurrency(monthly) + ' + GST'],
-  ].forEach(([k, v]) => {
-    doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(140,160,200);
-    doc.text(k, rx2 + 4, ry2);
+    ['Monthly Billing', formatCurrency(monthly)],
+  ].filter(Boolean).forEach(([k,v]) => {
+    doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(130,160,210);
+    doc.text(k, rx+4, ry);
     doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(255,255,255);
-    doc.text(v, rx2 + halfW - 4, ry2, { align: 'right' });
-    ry2 += 7;
+    doc.text(String(v), rx+hw-4, ry, { align:'right' });
+    ry += 7;
   });
   doc.setTextColor(0);
 
-  addFooter(doc, 1);
+  addFooter(doc, page.n, proposal);
 
-  // ─── SCOPE PAGES (grouped by category) ─────────────────────────────────────
-  const items = proposal.scope_items || [];
-  const grouped = {};
-  items.forEach(item => {
-    const cat = item.category || 'Other';
-    if (!grouped[cat]) grouped[cat] = [];
-    grouped[cat].push(item);
+  // ── PAGE 2: COMPANY INTRO ──────────────────────────────────────────────────
+  doc.addPage(); page.n++;
+  let y = addHeader(doc, 'ABOUT US', `#${proposal.proposal_number||'DRAFT'}`);
+
+  if (co.company_blurb) {
+    doc.setFont('helvetica','normal'); doc.setFontSize(10);
+    const blurb = doc.splitTextToSize(co.company_blurb, mr-ml);
+    doc.text(blurb, ml, y); y += blurb.length * 5.5 + 8;
+  } else {
+    doc.setFont('helvetica','normal'); doc.setFontSize(10);
+    const defaultBlurb = `${co.name} is a full-service mechanical contracting company providing preventive maintenance, service, and installation for commercial, strata, and industrial properties in British Columbia. Our licensed mechanical technicians deliver scheduled maintenance programs designed to protect your building assets, reduce lifecycle costs, and maintain regulatory compliance.`;
+    const bl = doc.splitTextToSize(defaultBlurb, mr-ml);
+    doc.text(bl, ml, y); y += bl.length * 5.5 + 8;
+  }
+
+  // Scope of services bullet list
+  doc.setFont('helvetica','bold'); doc.setFontSize(10);
+  doc.text('Services Included in This Program:', ml, y); y += 7;
+  doc.setFont('helvetica','normal'); doc.setFontSize(9);
+  const services = [
+    'Scheduled preventive maintenance at agreed visit intervals',
+    'Comprehensive equipment inspection, cleaning, lubrication, and adjustment',
+    'Safety control testing and verification',
+    'Deficiency identification with written reports and cost estimates',
+    'Equipment performance logging and trending',
+    'Emergency service line access',
+    'Annual performance review with building management',
+  ];
+  services.forEach(s => { doc.text(`•  ${s}`, ml+4, y); y+=5.5; });
+
+  addFooter(doc, page.n, proposal);
+
+  // ── PAGE 3: PRICING / ACCEPTANCE ──────────────────────────────────────────
+  doc.addPage(); page.n++;
+  y = addHeader(doc, 'PROPOSAL — PRICING & ACCEPTANCE', `#${proposal.proposal_number||'DRAFT'}`);
+
+  // Building + client reminder
+  doc.setFont('helvetica','bold'); doc.setFontSize(9);
+  doc.text(`Building: ${building?.name||'—'}`, ml, y);
+  doc.text(`Client: ${building?.client_name||building?.client_company||'—'}`, ml+100, y); y += 5;
+  doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+  if (building?.strata_number) { doc.text('Strata Plan ' + building.strata_number, ml, y); y+=5; }
+  const addr2 = [building?.address,building?.city,building?.province].filter(Boolean).join(', ');
+  if (addr2) { doc.text(addr2, ml, y); y+=5; }
+  y += 4;
+
+  // Service regimen
+  doc.setFillColor(235,243,255); doc.rect(ml, y-4, mr-ml, 16, 'F');
+  doc.setFont('helvetica','bold'); doc.setFontSize(9);
+  doc.text('Service Schedule:', ml+4, y);
+  doc.setFont('helvetica','normal');
+  doc.text(`${visitLabels} — ${visitCount} visit${visitCount!==1?'s':''}/year${qv.annual_clean?' + Annual Cleaning/Teardown':''}`, ml+40, y); y+=6;
+  const saMap = {shared:'Shared Residential & Commercial',commercial:'Commercial Common Areas',residential:'Residential Common Areas',mixed:'Mixed — see equipment list'};
+  doc.text(`Service Area: ${saMap[proposal.service_area_type||'shared']||'—'}`, ml+4, y); y+=10;
+
+  // Pricing table — lump sum
+  y = sectionHead(doc, 'Contract Pricing — Annual Lump Sum', y, ml, mr); y += 2;
+
+  const equipSubtot = items.filter(i=>i.category!=='Subcontracted Services').reduce((s,i)=>s+Number(i.annual_price||0),0);
+  const subSubtot   = items.filter(i=>i.category==='Subcontracted Services').reduce((s,i)=>s+Number(i.annual_price||0),0);
+  const manSubtot   = manItems.reduce((s,m)=>s+(Number(m.value)||0)*(Number(m.qty)||1),0);
+  const subtot      = equipSubtot + subSubtot + manSubtot;
+
+  const priceRows = [
+    ['Preventive Maintenance Labour', formatCurrency(equipSubtot)],
+    subSubtot > 0 ? ['Subcontracted Services', formatCurrency(subSubtot)] : null,
+    manSubtot > 0 ? ['Additional Services', formatCurrency(manSubtot)] : null,
+  ].filter(Boolean);
+
+  priceRows.forEach(([l,v], i) => {
+    if (i%2===0) { doc.setFillColor(248,250,255); doc.rect(ml, y-4, mr-ml, 6.5, 'F'); }
+    doc.setFont('helvetica','normal'); doc.setFontSize(9);
+    doc.text(l, ml+4, y); doc.text(v, mr-4, y, {align:'right'}); y+=7;
   });
 
-  const CAT_ORDER = ['HVAC','Hydronic','Plumbing','Drainage','Controls','Backup & Fuel',
-    'Chemical Treatment','Pool','Irrigation','Compressed Air','Radiant / Snowmelt',
-    'Meters & Gauges','Valves','Other'];
-  const cats = CAT_ORDER.filter(c => grouped[c]).concat(Object.keys(grouped).filter(c => !CAT_ORDER.includes(c)));
+  if (priceRows.length > 1) {
+    doc.setDrawColor(180); doc.line(ml, y-2, mr, y-2);
+    doc.setFont('helvetica','bold'); doc.setFontSize(9);
+    doc.text('Subtotal', ml+4, y+3); doc.text(formatCurrency(subtot), mr-4, y+3, {align:'right'}); y+=10;
+  }
 
-  doc.addPage();
-  let y = addHeader(doc, 'SCOPE OF WORK', `#${proposal.proposal_number}`);
-  let page = 2;
+  if (showGST && tax > 0) {
+    doc.setFont('helvetica','normal'); doc.setFontSize(9);
+    doc.text(`GST (${((co.tax_rate||CONFIG.TAX_RATE||0.05)*100).toFixed(0)}%)  ${co.gst||''}`, ml+4, y);
+    doc.text(formatCurrency(tax), mr-4, y, {align:'right'}); y+=7;
+  }
 
-  const checkPage = (need = 20) => {
-    if (y + need > 270) { addFooter(doc, page); doc.addPage(); page++; y = addHeader(doc, 'SCOPE OF WORK (cont.)', `#${proposal.proposal_number}`); }
-  };
+  // Total highlighted box
+  doc.setFillColor(15,25,45); doc.rect(ml, y-2, mr-ml, 12, 'F');
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(12);
+  doc.text('ANNUAL CONTRACT VALUE', ml+4, y+6);
+  doc.text(formatCurrency(showGST ? subtot+tax : subtot) + (showGST?' (incl. tax)':''), mr-4, y+6, {align:'right'});
+  doc.setTextColor(0); y+=16;
 
-  cats.forEach(cat => {
-    checkPage(18);
-    const isProgram = cat === 'Program Scope';
-    doc.setFillColor(...(isProgram ? [0, 100, 120] : [15, 25, 45]));
-    doc.rect(ml, y - 5, mr - ml, 8, 'F');
-    doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(10);
-    doc.text((isProgram ? 'PROGRAM SCOPE & SERVICES' : cat.toUpperCase()), ml + 3, y);
-    doc.setTextColor(0);
-    y += 8;
+  // Monthly
+  doc.setFillColor(235,243,255); doc.rect(ml, y-2, mr-ml, 10, 'F');
+  doc.setFont('helvetica','bold'); doc.setFontSize(10);
+  doc.text('Monthly Billing', ml+4, y+5);
+  doc.text(formatCurrency(showGST?(subtot+tax)/12:subtot/12) + (showGST?' incl. tax':''), mr-4, y+5, {align:'right'});
+  doc.setTextColor(0); y+=14;
 
-    grouped[cat].forEach(item => {
-      checkPage(15);
-      doc.setFillColor(245, 248, 255);
-      doc.rect(ml, y - 4, mr - ml, 8, 'F');
-      doc.setFont('helvetica','bold'); doc.setFontSize(9.5);
-      const itemLabel = [item.tag, item.equipment_type].filter(Boolean).join(' — ');
-      doc.text(itemLabel, ml + 3, y);
-      if (item.qty > 1) doc.text(`×${item.qty}`, mr - 35, y);
-      // Price on right
-      if (item.annual_price > 0) {
-        doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
-        doc.setTextColor(60,100,180);
-        doc.text(formatCurrency(item.annual_price) + '/yr', mr - 3, y, { align:'right' });
-        doc.setTextColor(0);
-      }
-      y += 5;
-      // Make/model sub-line
-      const makeModel = [item.manufacturer||item.make, item.model].filter(Boolean).join(' ');
-      if (makeModel) {
-        doc.setFont('helvetica','italic'); doc.setFontSize(8);
-        doc.setTextColor(100);
-        doc.text(makeModel, ml + 5, y);
-        doc.setTextColor(0);
-        y += 4;
-      }
-      y += 2;
+  // Customer requests / notes
+  if (building?.notes || proposal?.notes) {
+    const noteText = [building?.notes, proposal?.notes].filter(Boolean).join('\n');
+    y = checkPage(doc, y, 20, page, proposal);
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.text('Customer Notes / Special Requirements:', ml, y); y+=6;
+    doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+    const nl = doc.splitTextToSize(noteText, mr-ml-4);
+    doc.text(nl, ml+4, y); y += nl.length*4.5+6;
+  }
 
+  // Manual items breakdown (client-facing)
+  if (manItems.length) {
+    y = checkPage(doc, y, 10+manItems.length*6, page, proposal);
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.text('Additional Services:', ml, y); y+=6;
+    manItems.forEach(m => {
       doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
-      const lines = item.scope_lines || [];
-      lines.forEach(line => {
-        checkPage(6);
-        const wrapped = doc.splitTextToSize(`• ${line}`, mr - ml - 6);
-        doc.text(wrapped, ml + 5, y);
-        y += wrapped.length * 4.2;
-      });
-      y += 3;
+      doc.text(`•  ${m.description||'Item'}${m.qty>1?' ×'+m.qty:''}`, ml+4, y);
+      if (m.value>0) doc.text(formatCurrency(m.value*(m.qty||1))+'/yr', mr-4, y, {align:'right'});
+      y+=5;
     });
-    y += 4;
+    y+=4;
+  }
+
+  // Signatures
+  y = checkPage(doc, y, 40, page, proposal);
+  y += 4;
+  doc.setFillColor(245,248,255); doc.rect(ml, y-4, mr-ml, 36, 'F');
+  doc.setDrawColor(180); doc.rect(ml, y-4, mr-ml, 36);
+  doc.setFont('helvetica','bold'); doc.setFontSize(9);
+  doc.text('Acceptance — Upon Signature This Proposal Becomes a Binding Agreement', ml+4, y); y+=8;
+
+  const sw = (mr-ml)/3 - 4;
+  ['Customer Signature', 'Print Name & Title', 'Date'].forEach((l,i) => {
+    const x = ml + i*(sw+4);
+    doc.line(x, y+10, x+sw, y+10);
+    doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.text(l, x, y+14);
+  });
+  y += 20;
+
+  const sigName = [co.signatory, co.signatory_title].filter(Boolean).join(', ');
+  doc.setFont('helvetica','bold'); doc.setFontSize(8.5);
+  doc.text(`Authorized for ${co.name}:`, ml, y); y+=6;
+  ['Authorized Signature', `${sigName||'Authorized Representative'}`, 'Date'].forEach((l,i) => {
+    const x = ml + i*(sw+4);
+    doc.line(x, y+10, x+sw, y+10);
+    doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.text(l, x, y+14);
   });
 
-  // Equipment summary table
-  checkPage(30);
-  addFooter(doc, page);
-  doc.addPage(); page++;
-  y = addHeader(doc, 'EQUIPMENT SUMMARY', `#${proposal.proposal_number}`);
+  addFooter(doc, page.n, proposal);
 
-  doc.setFillColor(15,25,45); doc.rect(ml, y-5, mr-ml, 7, 'F');
+  // ── PAGE 4: EQUIPMENT LIST ─────────────────────────────────────────────────
+  doc.addPage(); page.n++;
+  y = addHeader(doc, 'EQUIPMENT SCHEDULE', `#${proposal.proposal_number||'DRAFT'}`);
+  y = sectionHead(doc, 'Equipment in Scope', y, ml, mr); y+=2;
+
+  doc.setFillColor(15,25,45); doc.rect(ml, y-4, mr-ml, 7, 'F');
   doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(8);
   doc.text('Tag', ml+2, y); doc.text('Equipment Type', ml+22, y);
-  doc.text('Make / Model', ml+95, y);
-  doc.text('Qty', ml+145, y); doc.text('Annual Price', ml+158, y);
-  doc.setTextColor(0); y += 7;
+  doc.text('Make / Model', ml+90, y); doc.text('Area', ml+140, y);
+  doc.text('Qty', ml+165, y);
+  doc.setTextColor(0); y+=7;
 
-  let subtot = 0;
-  const equipItems = items.filter(i => i.category !== 'Program Scope' && i.category !== 'Manual Items');
-  equipItems.forEach((item, idx) => {
-    checkPage(7);
-    if (idx % 2 === 0) { doc.setFillColor(248,250,255); doc.rect(ml, y-4, mr-ml, 6, 'F'); }
-    doc.setFont('helvetica','normal'); doc.setFontSize(8);
-    doc.text(item.tag || '—', ml+2, y);
-    doc.text((item.equipment_type||'').slice(0, 35), ml+22, y);
-    const mm = [item.manufacturer||item.make, item.model].filter(Boolean).join(' ').slice(0,28);
-    if (mm) doc.text(mm, ml+95, y);
-    doc.text(String(item.qty||1), ml+147, y);
-    if (item.annual_price > 0) doc.text(formatCurrency(item.annual_price), mr-2, y, {align:'right'});
-    subtot += Number(item.annual_price || 0);
-    y += 6;
-  });
+  const saLabels = {common_strata:'Common',commercial:'Commercial',residential_in_suite:'In-Suite',shared:'Shared'};
+  const equipItems = items.filter(i=>i.category!=='Subcontracted Services'&&i.category!=='Manual Items');
 
-  // Type count summary
-  y += 4;
+  // Type counts
   const typeCounts = {};
-  equipItems.forEach(it => {
-    const k = it.equipment_type || 'Other';
-    if (!typeCounts[k]) typeCounts[k] = 0;
-    typeCounts[k] += Number(it.qty) || 1;
+  equipItems.forEach(it => { const k=it.equipment_type||'Other'; typeCounts[k]=(typeCounts[k]||0)+(Number(it.qty)||1); });
+
+  equipItems.forEach((item,idx) => {
+    y = checkPage(doc, y, 7, page, proposal);
+    if (idx%2===0) { doc.setFillColor(248,250,255); doc.rect(ml, y-4, mr-ml, 6.5, 'F'); }
+    doc.setFont('helvetica','normal'); doc.setFontSize(8);
+    doc.text(item.tag||'—', ml+2, y);
+    doc.text((item.equipment_type||'').slice(0,30), ml+22, y);
+    const mm=[item.manufacturer||item.make,item.model].filter(Boolean).join(' ').slice(0,26);
+    if(mm) doc.text(mm, ml+90, y);
+    doc.text(saLabels[item.service_area||'']||'—', ml+140, y);
+    doc.text(String(item.qty||1), ml+168, y);
+    y+=6;
   });
-  checkPage(10 + Object.keys(typeCounts).length * 5);
-  doc.setFont('helvetica','bold'); doc.setFontSize(8.5); doc.text('Equipment Count by Type:', ml, y); y += 5;
+
+  // Count summary
+  y = checkPage(doc, y, 12+Object.keys(typeCounts).length*4.5, page, proposal);
+  y+=4; doc.setDrawColor(180); doc.line(ml, y, mr, y); y+=5;
+  doc.setFont('helvetica','bold'); doc.setFontSize(8.5);
+  doc.text('Summary by Type:', ml, y); y+=5;
   doc.setFont('helvetica','normal'); doc.setFontSize(8);
-  Object.entries(typeCounts).sort((a,b)=>b[1]-a[1]).forEach(([t,n]) => {
+  Object.entries(typeCounts).sort((a,b)=>b[1]-a[1]).forEach(([t,n])=>{
     doc.text(`${t}:`, ml+4, y);
-    doc.text(String(n) + (n===1?' unit':' units'), ml+100, y);
-    y += 4.5;
+    doc.text(`${n} unit${n!==1?'s':''}`, ml+100, y);
+    y+=4.5;
   });
-  doc.text(`Total units: ${equipItems.reduce((s,i) => s+(Number(i.qty)||1), 0)}`, ml+4, y); y += 6;
+  doc.text(`Total: ${equipItems.reduce((s,i)=>s+(Number(i.qty)||1),0)} units across ${equipItems.length} items`, ml+4, y); y+=6;
 
-  doc.setDrawColor(150); doc.line(ml, y, mr, y); y += 5;
+  addFooter(doc, page.n, proposal);
 
-  // Manual line items (client-facing only)
-  const manualItems = (proposal.manual_items || []).filter(m => m.include !== false && m.client_facing);
-  const manualTotal = manualItems.reduce((s,m) => s + (Number(m.value)||0)*(Number(m.qty)||1), 0);
-  if (manualItems.length) {
-    checkPage(15 + manualItems.length * 6);
-    doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.text('Additional Services', ml, y); y += 6;
-    manualItems.forEach(m => {
-      doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
-      const label = `${m.description||'Item'}${m.qty>1?' ×'+m.qty:''}`;
-      doc.text(label, ml+4, y);
-      if (m.value > 0) doc.text(formatCurrency(m.value * (m.qty||1)) + '/yr', mr-2, y, {align:'right'});
-      y += 5;
-    });
-    subtot += manualTotal;
-    y += 3;
-  }
+  // ── PAGE 5: MAINTENANCE DESCRIPTIONS (grouped by equipment TYPE) ───────────
+  doc.addPage(); page.n++;
+  y = addHeader(doc, 'MAINTENANCE SCOPE OF WORK', `#${proposal.proposal_number||'DRAFT'}`);
+  y = sectionHead(doc, `Service Regimen — ${visitLabels}${qv.annual_clean?' + Annual Cleaning':''}`, y, ml, mr); y+=3;
 
-  // ─── PRICING PAGE ────────────────────────────────────────────────────────────
-  checkPage(60);
-  doc.setFont('helvetica','bold'); doc.setFontSize(11);
-  doc.text('Pricing Summary', ml, y); y += 8;
-  const tax = subtot * CONFIG.TAX_RATE;
-  [
-    ['Subtotal — Annual Contract', formatCurrency(subtot), false],
-    [`GST (${(CONFIG.TAX_RATE*100).toFixed(0)}%)`, formatCurrency(tax), false],
-    ['Total Annual (incl. tax)', formatCurrency(subtot + tax), true],
-    ['Monthly Billing (incl. tax)', formatCurrency((subtot + tax)/12), true],
-  ].forEach(([label, val, bold]) => {
-    doc.setFont('helvetica', bold?'bold':'normal');
-    doc.setFontSize(bold ? 11 : 9);
-    doc.text(label, ml, y);
-    doc.text(val, mr, y, {align:'right'});
-    y += bold ? 8 : 6;
+  // Group scope by equipment_type — one entry per type, not per asset
+  const typeScope = {};
+  equipItems.forEach(item => {
+    const t = item.equipment_type || 'Other';
+    if (!typeScope[t]) {
+      typeScope[t] = { lines: item.scope_lines||[], qty: 0, make:'', examples:[] };
+    }
+    typeScope[t].qty += Number(item.qty)||1;
+    if (item.manufacturer||item.make) typeScope[t].make = item.manufacturer||item.make;
+    if (item.tag) typeScope[t].examples.push(item.tag);
   });
 
-  // Inclusions / exclusions
-  y += 8;
-  const incl = [
-    'All labour and materials required for routine preventive maintenance tasks',
-    'Shop supplies (vacuum, cleaning supplies, lubricants)',
-    'Scheduled task reports delivered within 30 days of each visit',
-    'Annual performance review with property manager',
-    '24-hour emergency line access (604-298-8383)',
-  ];
-  const excl = [
-    'Replacement parts and components',
-    'Repairs beyond routine maintenance scope',
-    'Emergency or after-hours labour (billed at Schedule D rates)',
-    'New equipment installation or commissioning',
-  ];
-  checkPage(40);
-  doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.text('Inclusions', ml, y); y += 5;
-  doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
-  incl.forEach(l => { doc.text(`• ${l}`, ml+4, y); y += 5; });
-  y += 3;
-  doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.text('Exclusions', ml, y); y += 5;
-  doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
-  excl.forEach(l => { doc.text(`• ${l}`, ml+4, y); y += 5; });
-
-  // Notes
-  if (proposal.notes) {
-    y += 5; checkPage(20);
-    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.text('Special Notes', ml, y); y += 5;
+  Object.entries(typeScope).forEach(([type, data]) => {
+    y = checkPage(doc, y, 18, page, proposal);
+    doc.setFillColor(235,243,255); doc.rect(ml, y-4, mr-ml, 10, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(10);
+    doc.text(`${type}  ×${data.qty}`, ml+4, y);
+    if (data.examples.length) {
+      doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(100);
+      doc.text(`(${data.examples.slice(0,6).join(', ')}${data.examples.length>6?'…':''})`, ml+4, y+5);
+      doc.setTextColor(0);
+    }
+    y+=10;
     doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
-    doc.text(doc.splitTextToSize(proposal.notes, mr-ml), ml, y);
-    y += doc.splitTextToSize(proposal.notes, mr-ml).length * 4.5;
+    (data.lines||[]).forEach(line => {
+      y = checkPage(doc, y, 6, page, proposal);
+      const wrapped = doc.splitTextToSize(`•  ${line}`, mr-ml-8);
+      doc.text(wrapped, ml+5, y);
+      y += wrapped.length * 4.2;
+    });
+    y+=4;
+  });
+
+  // Subcontracted scope
+  const subItems = items.filter(i=>i.category==='Subcontracted Services');
+  if (subItems.length) {
+    y = checkPage(doc, y, 14, page, proposal);
+    y = sectionHead(doc, 'Subcontracted & Third-Party Services', y, ml, mr); y+=3;
+    subItems.forEach(item => {
+      y = checkPage(doc, y, 10, page, proposal);
+      doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.text(item.equipment_type, ml+4, y); y+=5;
+      doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+      (item.scope_lines||[]).forEach(line => {
+        const w=doc.splitTextToSize(`•  ${line}`, mr-ml-8); doc.text(w, ml+5, y); y+=w.length*4.2;
+      });
+      y+=3;
+    });
   }
 
-  // ─── TERMS & SIGNATURE PAGE ──────────────────────────────────────────────────
-  addFooter(doc, page);
-  doc.addPage(); page++;
-  y = addHeader(doc, 'TERMS & ACCEPTANCE', `#${proposal.proposal_number}`);
+  addFooter(doc, page.n, proposal);
 
+  // ── PAGE 6: TERMS & CONDITIONS ─────────────────────────────────────────────
+  doc.addPage(); page.n++;
+  y = addHeader(doc, 'TERMS & CONDITIONS', `#${proposal.proposal_number||'DRAFT'}`);
   doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
-  const terms = defaultTerms();
-  const termLines = doc.splitTextToSize(terms, mr - ml);
-  doc.text(termLines, ml, y); y += termLines.length * 4.3 + 10;
+  const terms = _defaultTerms();
+  const termLines = doc.splitTextToSize(terms, mr-ml);
+  doc.text(termLines, ml, y);
+  addFooter(doc, page.n, proposal);
 
-  doc.setFont('helvetica','bold'); doc.setFontSize(10);
-  doc.text('Acceptance', ml, y); y += 6;
-  doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
-  doc.text('By signing below, the Customer accepts the terms and scope of this proposal.', ml, y); y += 12;
+  // ── PAGE 7: RATE SHEET ─────────────────────────────────────────────────────
+  doc.addPage(); page.n++;
+  y = addHeader(doc, 'SCHEDULE D — LABOUR RATE SHEET', `#${proposal.proposal_number||'DRAFT'}`);
+  const yr = new Date().getFullYear();
+  doc.setFont('helvetica','normal'); doc.setFontSize(9);
+  doc.text(`${co.name} — Prevailing Labour Rates ${yr}`, ml, y); y+=7;
 
-  const sigCol = (mr - ml) / 3;
-  ['Authorized Signature (Customer)', 'Print Name & Title', 'Date'].forEach((lbl, i) => {
-    const x = ml + i * sigCol;
-    doc.line(x, y, x + sigCol - 8, y);
-    doc.text(lbl, x, y + 4);
+  const lr = CONFIG.LABOUR_RATES || {};
+  const rateRows = [
+    ['Weekday Service Call (minimum)', formatCurrency(lr.weekday_callout||145)],
+    ['Weekday Hourly Rate', formatCurrency(lr.weekday_hourly||115) + ' / hr'],
+    ['Saturday / After-Hours Call', formatCurrency(lr.weekend_callout||260)],
+    ['Saturday / After-Hours Hourly', formatCurrency(lr.weekend_hourly||230) + ' / hr'],
+    ['PM Contract Hourly Rate', formatCurrency(lr.pm_hourly||115) + ' / hr'],
+    ['Emergency / Holiday Callout', 'By quotation'],
+  ];
+  rateRows.forEach(([l,v], i) => {
+    y = checkPage(doc, y, 7, page, proposal);
+    if (i%2===0) { doc.setFillColor(248,250,255); doc.rect(ml, y-4, mr-ml, 6.5, 'F'); }
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.text(l, ml+4, y);
+    doc.setFont('helvetica','normal'); doc.text(v, mr-4, y, {align:'right'}); y+=7;
   });
-  y += 16;
 
-  ['Authorized Signature (Contractor)', 'Print Name & Title', 'Date'].forEach((lbl, i) => {
-    const x = ml + i * sigCol;
-    doc.line(x, y, x + sigCol - 8, y);
-    doc.text(lbl, x, y + 4);
+  y+=5;
+  doc.setFont('helvetica','italic'); doc.setFontSize(8);
+  doc.text('Rates subject to annual review. All rates exclude applicable taxes. Materials billed at cost plus markup per Schedule C.', ml, y); y+=6;
+  if (co.tsb) { doc.text(`BC Contractors Licence / TSB: ${co.tsb}`, ml, y); y+=5; }
+  if (showGST && co.gst) { doc.text(`GST Registration: ${co.gst}`, ml, y); }
+
+  addFooter(doc, page.n, proposal);
+
+  doc.save(`Proposal-${proposal.proposal_number||'Draft'}.pdf`);
+}
+
+// ── Simple proposal PDF (basic, from list view) ────────────────────────────────
+export function generateProposalPDF(proposal, building) {
+  const coverImg = building?.photo_url || null;
+  generateProposalPDFEnhanced(proposal, building, coverImg);
+}
+
+// ── Quote PDF ──────────────────────────────────────────────────────────────────
+export function generateQuotePDF(quote, building) {
+  const jsPDF = getjsPDF();
+  const doc   = new jsPDF({ unit:'mm', format:'letter' });
+  const co    = getCompany();
+  let y       = addHeader(doc, 'DEFICIENCY QUOTE', `#${quote.quote_number}`);
+  doc.setFontSize(9); doc.setFont('helvetica','bold');
+  doc.text('Prepared For:', 14, y); doc.setFont('helvetica','normal'); y+=5;
+  doc.text(building?.client_name||building?.name||'—', 14, y); y+=5;
+  if (building?.address) { doc.text(building.address, 14, y); y+=5; }
+  y+=6;
+  const items = quote.line_items || [];
+  items.forEach((item, i) => {
+    if (y>255) { doc.addPage(); y=20; }
+    if (i%2===0) { doc.setFillColor(248,250,255); doc.rect(14, y-4, 187.9, 6.5, 'F'); }
+    doc.setFont('helvetica','normal'); doc.setFontSize(9);
+    doc.text(item.description||'—', 16, y);
+    doc.text(formatCurrency(item.total||0), 201.9, y, {align:'right'});
+    y+=7;
   });
+  const total = (quote.subtotal||0); const tax = total*(CONFIG.TAX_RATE||0.05);
+  y+=4; doc.setDrawColor(180); doc.line(14, y, 201.9, y); y+=5;
+  [['Subtotal',formatCurrency(total)],[`GST (5%)`,formatCurrency(tax)],['Total',formatCurrency(total+tax)]].forEach(([l,v],i)=>{
+    doc.setFont('helvetica',i===2?'bold':'normal'); doc.setFontSize(i===2?11:9);
+    doc.text(l, 130, y); doc.text(v, 201.9, y, {align:'right'}); y+=i===2?9:6;
+  });
+  const pg = doc.getNumberOfPages();
+  for (let p=1;p<=pg;p++) { doc.setPage(p); addFooter(doc, p, quote); }
+  doc.save(`Quote-${quote.quote_number||'Draft'}.pdf`);
+}
 
-  addFooter(doc, page);
+function _defaultTerms() {
+  return `PAYMENT TERMS: Net 30 days from invoice date. Accounts past due are subject to interest at 2% per month (24% per annum).
 
-  doc.save(`Proposal-${proposal.proposal_number || 'Draft'}.pdf`);
+SCOPE: This proposal covers only the preventive maintenance services described herein. Repairs, parts replacements, emergency callouts, and any work outside the described scope are not included and will be quoted separately.
+
+EXCLUSIONS: Replacement parts and components; repairs beyond routine maintenance; emergency or after-hours labour; equipment commissioning or new installation; work required due to owner-caused damage; water treatment chemicals unless specified.
+
+ACCESS: Client agrees to provide reasonable access to all equipment areas during scheduled visits. Inaccessible equipment may result in additional charges or rescheduling.
+
+CONTRACT TERM: Initial term of one (1) year from the date of acceptance. Automatically renews for successive one-year terms unless either party provides 30 days written notice of cancellation.
+
+RATE ADJUSTMENTS: Labour rates are subject to annual adjustment with 30 days written notice.
+
+LIMITATION OF LIABILITY: ${getCompany().name||'Contractor'} shall not be liable for consequential or indirect damages arising from the performance of this contract.
+
+GOVERNING LAW: This agreement is governed by the laws of British Columbia, Canada.`;
 }

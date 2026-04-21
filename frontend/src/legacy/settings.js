@@ -342,26 +342,170 @@ export const Settings = {
 
   // ─── Company Info ──────────────────────────────────────────────────────────
   async _renderCompany(el) {
-    const c = CONFIG.COMPANY;
+    let saved = null;
+    try { saved = await UserSettings.get('company_profile'); } catch {}
+    const c = saved ? { ...CONFIG.COMPANY, ...saved } : { ...CONFIG.COMPANY };
+
     el.innerHTML = `
-      <div class="report-card">
-        <h3>Company Information</h3>
-        <p class="text-muted mb-16" style="font-size:13px">
-          Displayed on all PDF exports. Update <code>js/config.js</code> COMPANY block directly,
-          then redeploy to Cloudflare Pages.
-        </p>
-        <div class="detail-grid">
-          <div class="detail-field"><label>Company Name</label><div class="field-value">${c.name}</div></div>
-          <div class="detail-field"><label>Address</label><div class="field-value">${c.address}, ${c.city}, ${c.province} ${c.postal}</div></div>
-          <div class="detail-field"><label>Phone</label><div class="field-value">${c.phone}</div></div>
-          <div class="detail-field"><label>Email</label><div class="field-value">${c.email}</div></div>
-          <div class="detail-field"><label>Website</label><div class="field-value">${c.website}</div></div>
-          <div class="detail-field"><label>GST Number</label><div class="field-value">${c.gst}</div></div>
+      <div class="card">
+        <div class="card-header">
+          <h3>Company Profile</h3>
+          <span style="font-size:11.5px;color:var(--text-dim)">Used on all PDF exports. Saved to Supabase — survives redeployments.</span>
         </div>
-        <p class="text-muted mt-16" style="font-size:12px">
-          To edit company details: open <code>js/config.js</code>, update the COMPANY block, commit to GitHub, Cloudflare will redeploy automatically.
-        </p>
+        <div class="card-body">
+          <form id="company-form">
+            <div style="font-family:var(--font-cond);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:10px">Company</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Company Name</label>
+                <input name="name" class="input" value="${c.name||''}">
+              </div>
+              <div class="form-group">
+                <label>Division / Brand Name</label>
+                <input name="division" class="input" value="${c.division||''}">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Street Address</label>
+                <input name="address" class="input" value="${c.address||''}">
+              </div>
+              <div class="form-group">
+                <label>City</label>
+                <input name="city" class="input" value="${c.city||''}">
+              </div>
+              <div class="form-group">
+                <label>Province</label>
+                <input name="province" class="input" value="${c.province||'BC'}">
+              </div>
+              <div class="form-group">
+                <label>Postal Code</label>
+                <input name="postal" class="input" value="${c.postal||''}">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Phone</label>
+                <input name="phone" class="input" value="${c.phone||''}">
+              </div>
+              <div class="form-group">
+                <label>Email</label>
+                <input name="email" type="email" class="input" value="${c.email||''}">
+              </div>
+              <div class="form-group">
+                <label>Website</label>
+                <input name="website" class="input" value="${c.website||''}">
+              </div>
+            </div>
+
+            <div style="font-family:var(--font-cond);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin:16px 0 10px">Tax & Regulatory</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>GST Number</label>
+                <input name="gst" class="input" value="${c.gst||''}">
+              </div>
+              <div class="form-group">
+                <label>PST Number</label>
+                <input name="pst" class="input" value="${c.pst||''}">
+              </div>
+              <div class="form-group">
+                <label>TSB / Trade Registration</label>
+                <input name="tsb" class="input" value="${c.tsb||''}">
+              </div>
+              <div class="form-group" style="display:flex;align-items:flex-end;padding-bottom:6px">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                  <input type="checkbox" name="show_gst" ${c.show_gst!==false?'checked':''}>
+                  Show GST on proposals
+                </label>
+              </div>
+            </div>
+
+            <div style="font-family:var(--font-cond);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin:16px 0 10px">Team</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Sales Person</label>
+                <input name="sales_person" class="input" value="${c.sales_person||''}">
+              </div>
+              <div class="form-group">
+                <label>Sales Manager</label>
+                <input name="sales_manager" class="input" value="${c.sales_manager||''}">
+              </div>
+              <div class="form-group">
+                <label>Division Manager</label>
+                <input name="division_manager" class="input" value="${c.division_manager||''}">
+              </div>
+              <div class="form-group">
+                <label>Authorized Signatory</label>
+                <input name="signatory" class="input" value="${c.signatory||''}">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Signatory Title</label>
+                <input name="signatory_title" class="input" value="${c.signatory_title||''}">
+              </div>
+              <div class="form-group">
+                <label>Contact Phone (for proposals)</label>
+                <input name="contact_phone" class="input" value="${c.contact_phone||c.phone||''}">
+              </div>
+            </div>
+
+            <div style="font-family:var(--font-cond);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin:16px 0 10px">Company Blurb (shown on proposal intro page)</div>
+            <div class="form-group">
+              <textarea name="company_blurb" class="input" rows="4" placeholder="e.g. MEC Mechanical Inc. is a full-service mechanical contracting company serving the Lower Mainland since 1987...">${c.company_blurb||''}</textarea>
+            </div>
+
+            <div style="font-family:var(--font-cond);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin:16px 0 10px">Company Logo (used on PDF cover)</div>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+              ${c.logo_data ? `<img src="${c.logo_data}" style="max-height:60px;max-width:180px;border:1px solid var(--border);border-radius:var(--radius)">` : '<span style="font-size:12px;color:var(--text-muted)">No logo uploaded</span>'}
+              <label class="btn btn-sm btn-secondary" style="cursor:pointer">
+                Upload Logo
+                <input type="file" id="logo-upload-inp" accept="image/*" style="display:none">
+              </label>
+              ${c.logo_data ? '<button type="button" class="btn btn-sm btn-danger" id="logo-clear-btn">Remove</button>' : ''}
+            </div>
+            <input type="hidden" name="logo_data" id="logo-data-field" value="${c.logo_data||''}">
+
+            <div style="margin-top:16px;display:flex;gap:8px">
+              <button type="submit" class="btn btn-primary">Save Company Profile</button>
+              <button type="button" class="btn btn-secondary" id="company-reset-btn">Reset to Config Defaults</button>
+            </div>
+          </form>
+        </div>
       </div>
     `;
+
+    // Logo upload
+    document.getElementById('logo-upload-inp')?.addEventListener('change', e => {
+      const file = e.target.files[0]; if (!file) return;
+      if (file.size > 2*1024*1024) { notify.warn('Logo must be under 2 MB.'); return; }
+      const reader = new FileReader();
+      reader.onload = ev => {
+        document.getElementById('logo-data-field').value = ev.target.result;
+        notify.success('Logo loaded. Save to persist.');
+      };
+      reader.readAsDataURL(file);
+    });
+    document.getElementById('logo-clear-btn')?.addEventListener('click', () => {
+      document.getElementById('logo-data-field').value = '';
+      notify.info('Logo removed. Save to persist.');
+    });
+    document.getElementById('company-reset-btn')?.addEventListener('click', async () => {
+      try { await UserSettings.set('company_profile', null); Object.assign(CONFIG.COMPANY, CONFIG.COMPANY); }
+      catch {}
+      notify.info('Reset to config.js defaults on next reload.');
+    });
+
+    document.getElementById('company-form')?.addEventListener('submit', async e => {
+      e.preventDefault();
+      const fd = new FormData(e.target); const data = {};
+      fd.forEach((v,k) => { data[k] = v; });
+      data.show_gst = !!e.target.elements.show_gst?.checked;
+      try {
+        await UserSettings.set('company_profile', data);
+        Object.assign(CONFIG.COMPANY, data);
+        notify.success('Company profile saved.');
+      } catch(err) { notify.error(err.message); }
+    });
   },
 };

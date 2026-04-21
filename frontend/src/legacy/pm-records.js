@@ -171,23 +171,71 @@ export const PMRecords = {
   pickEquipment() {
     const cache = this._equipCache;
     if (!cache.length) { notify.warn('Select a building first — no equipment loaded.'); return; }
+    // Search/filter support
+    let filtered = cache;
     openModal({
       title: 'Select Equipment Serviced',
-      size: 'md',
-      body: `<div style="max-height:340px;overflow-y:auto">
-        ${cache.map(e => `<label class="check-row">
-          <input type="checkbox" value="${e.id}" data-tag="${e.tag}" data-type="${e.equipment_type}">
-          <span><strong>${e.tag || '—'}</strong> ${e.equipment_type} — ${e.location || ''}</span>
-        </label>`).join('')}
-      </div>`,
-      footer: `<button class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
+      size: 'lg',
+      body: `
+        <div style="margin-bottom:10px;display:flex;gap:8px">
+          <input type="search" id="equip-pick-search" class="input input-sm" placeholder="Filter by tag, type, location, make…" style="flex:1">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;text-transform:none;letter-spacing:0;cursor:pointer;color:var(--text-dim)">
+            <input type="checkbox" id="equip-pick-all"> Select All
+          </label>
+        </div>
+        <div id="equip-pick-list" style="max-height:400px;overflow-y:auto">
+          ${cache.map(e => {
+            const mm = [e.manufacturer||e.make, e.model].filter(Boolean).join(' ');
+            return `<label class="check-row" style="display:flex;align-items:flex-start;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border);cursor:pointer">
+              <input type="checkbox" class="equip-pick-chk" value="${e.id}"
+                data-tag="${e.tag||''}" data-type="${e.equipment_type}"
+                data-make="${e.manufacturer||e.make||''}" data-model="${e.model||''}"
+                data-loc="${e.location||''}" data-area="${e.service_area||''}"
+                style="margin-top:2px;flex-shrink:0">
+              <span>
+                <strong style="font-family:var(--font-mono);font-size:12px">${e.tag||'—'}</strong>
+                <span style="font-size:13px;margin-left:6px">${e.equipment_type}</span>
+                ${mm ? `<span style="font-size:11.5px;color:var(--text-dim);margin-left:6px">${mm}</span>` : ''}
+                <br>
+                <span style="font-size:11.5px;color:var(--text-muted)">${[e.location, e.service_area ? ({common_strata:'Common Strata',commercial:'Commercial',residential_in_suite:'In-Suite'}[e.service_area]||e.service_area) : ''].filter(Boolean).join(' · ')}</span>
+              </span>
+            </label>`;
+          }).join('')}
+        </div>`,
+      footer: `<button class="btn btn-secondary" id="equip-pick-cancel">Cancel</button>
                <button class="btn btn-primary" id="equip-pick-ok">Add Selected</button>`,
     });
-    window.closeModal = closeModal;
+
+    document.getElementById('equip-pick-cancel').onclick = closeModal;
+
+    // Search filter
+    document.getElementById('equip-pick-search').oninput = e => {
+      const q = e.target.value.toLowerCase();
+      document.querySelectorAll('#equip-pick-list .check-row').forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    };
+
+    // Select all
+    document.getElementById('equip-pick-all').onchange = e => {
+      document.querySelectorAll('.equip-pick-chk').forEach(chk => {
+        if (chk.closest('.check-row').style.display !== 'none') chk.checked = e.target.checked;
+      });
+    };
+
     document.getElementById('equip-pick-ok').onclick = () => {
-      document.querySelectorAll('.check-row input:checked').forEach(chk => {
+      document.querySelectorAll('.equip-pick-chk:checked').forEach(chk => {
         if (!this._equipServiced.find(e => e.equipment_id === chk.value)) {
-          this._equipServiced.push({ equipment_id: chk.value, tag: chk.dataset.tag, type: chk.dataset.type, work_performed: '', hours: 0 });
+          this._equipServiced.push({
+            equipment_id: chk.value,
+            tag: chk.dataset.tag,
+            type: chk.dataset.type,
+            make: chk.dataset.make,
+            model: chk.dataset.model,
+            location: chk.dataset.loc,
+            service_area: chk.dataset.area,
+            work_performed: '', hours: 0
+          });
         }
       });
       closeModal();
@@ -201,7 +249,11 @@ export const PMRecords = {
     el.innerHTML = this._equipServiced.map((e, i) => `
       <div class="service-item">
         <div class="service-item-header">
-          <strong>${e.tag || '—'} — ${e.type}</strong>
+          <div>
+            <strong style="font-family:var(--font-mono)">${e.tag || '—'}</strong>
+            <span style="margin-left:6px">${e.type}</span>
+            ${(e.make||e.model) ? `<span style="font-size:11.5px;color:var(--text-dim);margin-left:6px">${[e.make,e.model].filter(Boolean).join(' ')}</span>` : ''}
+          </div>
           <button class="btn btn-xs btn-danger" onclick="PMR.removeEquip(${i})">✕</button>
         </div>
         <div class="form-row" style="margin-top:.5rem">
