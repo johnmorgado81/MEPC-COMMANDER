@@ -181,6 +181,8 @@ async function _step1(el, wiz) {
     if (bid) {
       const b = S.buildingsList.find(x => x.id === bid);
       if (b) {
+        // Auto-use building photo as cover if not already set
+        if (b.photo_url && !S.coverImageDataUrl) S.coverImageDataUrl = b.photo_url;
         S.building = {
           building_id: bid,
           name: b.name||'', strata_number: b.strata_number||'',

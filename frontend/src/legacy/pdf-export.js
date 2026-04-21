@@ -400,9 +400,25 @@ export function generateProposalPDFEnhanced(proposal, building, coverImageDataUr
       doc.setFont('helvetica','bold'); doc.setFontSize(9.5);
       const itemLabel = [item.tag, item.equipment_type].filter(Boolean).join(' — ');
       doc.text(itemLabel, ml + 3, y);
-      // Per-item pricing omitted — totals shown on pricing page only
       if (item.qty > 1) doc.text(`×${item.qty}`, mr - 35, y);
-      y += 7;
+      // Price on right
+      if (item.annual_price > 0) {
+        doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+        doc.setTextColor(60,100,180);
+        doc.text(formatCurrency(item.annual_price) + '/yr', mr - 3, y, { align:'right' });
+        doc.setTextColor(0);
+      }
+      y += 5;
+      // Make/model sub-line
+      const makeModel = [item.manufacturer||item.make, item.model].filter(Boolean).join(' ');
+      if (makeModel) {
+        doc.setFont('helvetica','italic'); doc.setFontSize(8);
+        doc.setTextColor(100);
+        doc.text(makeModel, ml + 5, y);
+        doc.setTextColor(0);
+        y += 4;
+      }
+      y += 2;
 
       doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
       const lines = item.scope_lines || [];
@@ -426,25 +442,62 @@ export function generateProposalPDFEnhanced(proposal, building, coverImageDataUr
   doc.setFillColor(15,25,45); doc.rect(ml, y-5, mr-ml, 7, 'F');
   doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(8);
   doc.text('Tag', ml+2, y); doc.text('Equipment Type', ml+22, y);
-  doc.text('Qty', ml+120, y); doc.text('Frequency', ml+135, y);
+  doc.text('Make / Model', ml+95, y);
+  doc.text('Qty', ml+145, y); doc.text('Annual Price', ml+158, y);
   doc.setTextColor(0); y += 7;
 
   let subtot = 0;
-  // Only equipment items — exclude Program Scope entries
-  const equipItems = items.filter(i => i.category !== 'Program Scope');
+  const equipItems = items.filter(i => i.category !== 'Program Scope' && i.category !== 'Manual Items');
   equipItems.forEach((item, idx) => {
     checkPage(7);
     if (idx % 2 === 0) { doc.setFillColor(248,250,255); doc.rect(ml, y-4, mr-ml, 6, 'F'); }
     doc.setFont('helvetica','normal'); doc.setFontSize(8);
     doc.text(item.tag || '—', ml+2, y);
-    doc.text((item.equipment_type||'').slice(0, 50), ml+22, y);
-    doc.text(String(item.qty||1), ml+122, y);
-    doc.text(item.frequency || proposal.frequency || '—', ml+135, y);
+    doc.text((item.equipment_type||'').slice(0, 35), ml+22, y);
+    const mm = [item.manufacturer||item.make, item.model].filter(Boolean).join(' ').slice(0,28);
+    if (mm) doc.text(mm, ml+95, y);
+    doc.text(String(item.qty||1), ml+147, y);
+    if (item.annual_price > 0) doc.text(formatCurrency(item.annual_price), mr-2, y, {align:'right'});
     subtot += Number(item.annual_price || 0);
     y += 6;
   });
+
+  // Type count summary
   y += 4;
+  const typeCounts = {};
+  equipItems.forEach(it => {
+    const k = it.equipment_type || 'Other';
+    if (!typeCounts[k]) typeCounts[k] = 0;
+    typeCounts[k] += Number(it.qty) || 1;
+  });
+  checkPage(10 + Object.keys(typeCounts).length * 5);
+  doc.setFont('helvetica','bold'); doc.setFontSize(8.5); doc.text('Equipment Count by Type:', ml, y); y += 5;
+  doc.setFont('helvetica','normal'); doc.setFontSize(8);
+  Object.entries(typeCounts).sort((a,b)=>b[1]-a[1]).forEach(([t,n]) => {
+    doc.text(`${t}:`, ml+4, y);
+    doc.text(String(n) + (n===1?' unit':' units'), ml+100, y);
+    y += 4.5;
+  });
+  doc.text(`Total units: ${equipItems.reduce((s,i) => s+(Number(i.qty)||1), 0)}`, ml+4, y); y += 6;
+
   doc.setDrawColor(150); doc.line(ml, y, mr, y); y += 5;
+
+  // Manual line items (client-facing only)
+  const manualItems = (proposal.manual_items || []).filter(m => m.include !== false && m.client_facing);
+  const manualTotal = manualItems.reduce((s,m) => s + (Number(m.value)||0)*(Number(m.qty)||1), 0);
+  if (manualItems.length) {
+    checkPage(15 + manualItems.length * 6);
+    doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.text('Additional Services', ml, y); y += 6;
+    manualItems.forEach(m => {
+      doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+      const label = `${m.description||'Item'}${m.qty>1?' ×'+m.qty:''}`;
+      doc.text(label, ml+4, y);
+      if (m.value > 0) doc.text(formatCurrency(m.value * (m.qty||1)) + '/yr', mr-2, y, {align:'right'});
+      y += 5;
+    });
+    subtot += manualTotal;
+    y += 3;
+  }
 
   // ─── PRICING PAGE ────────────────────────────────────────────────────────────
   checkPage(60);

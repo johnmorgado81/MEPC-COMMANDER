@@ -83,6 +83,7 @@ export const Buildings = {
         </div>
         <div class="card">
           <div class="card-header"><h3>${b.name}</h3>${statusBadge(b.status||'active')}</div>
+          ${b.photo_url ? `<div style="padding:12px 16px;border-bottom:1px solid var(--border)"><img src="${b.photo_url}" style="max-height:200px;max-width:100%;border-radius:var(--radius);display:block"></div>` : ''}
           <div class="card-body detail-fields">
             ${df('Client',b.client_name)} ${df('Company',b.client_company)}
             ${df('Email',b.client_email)} ${df('Phone',b.client_phone)}
@@ -133,6 +134,16 @@ export const Buildings = {
           <div class="progress-bar"><div class="progress-fill" id="bld-scan-prog" style="width:0%"></div></div>
           <div id="bld-scan-msg" style="font-size:11.5px;color:var(--text-dim);margin-top:4px"></div>
         </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <div style="font-family:var(--font-cond);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Building Photo</div>
+        <div id="bld-photo-preview" style="margin-bottom:8px"></div>
+        <label class="btn btn-sm btn-secondary" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+          📷 Upload Photo
+          <input type="file" id="bld-photo-inp" accept="image/*" style="display:none">
+        </label>
+        <span style="font-size:11.5px;color:var(--text-muted);margin-left:8px">Saved to building profile, used in future proposals</span>
       </div>
 
       <div style="border-top:1px solid var(--border);margin:16px 0 14px;position:relative">
@@ -246,6 +257,9 @@ export const Buildings = {
 
     // OCR / AI doc scanner
     wireBuildingScanner();
+
+    // Building photo
+    wireBuildingPhoto(id);
   },
 
   async saveBuilding(id) {
@@ -476,6 +490,65 @@ function regexExtract(text) {
   const email   = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-z]{2,}/)?.[0] || null;
   const postal  = text.match(/\b[A-Z]\d[A-Z]\s?\d[A-Z]\d\b/i)?.[0] || null;
   return { client_phone: phone, client_email: email, postal_code: postal };
+}
+
+
+// ─── Building photo upload & preview ──────────────────────────────────────────
+function wireBuildingPhoto(existingId) {
+  let _photoData = null;
+
+  // Load existing photo from building if editing
+  if (existingId) {
+    DB.getById(existingId).then(b => {
+      if (b?.photo_url) {
+        _photoData = b.photo_url;
+        renderPhotoPreview(b.photo_url);
+      }
+    }).catch(() => {});
+  }
+
+  const inp = document.getElementById('bld-photo-inp');
+  if (!inp) return;
+
+  inp.onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 3 * 1024 * 1024) { notify.warn('Photo must be under 3 MB.'); return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      _photoData = ev.target.result;
+      renderPhotoPreview(_photoData);
+      // Patch the save button to include photo
+      const origSave = document.getElementById('bld-save-btn').onclick;
+      document.getElementById('bld-save-btn').onclick = async () => {
+        // inject photo_url into form before save
+        const form = document.getElementById('bld-form');
+        if (form && _photoData) {
+          if (!form.elements.photo_url) {
+            const h = document.createElement('input');
+            h.type = 'hidden'; h.name = 'photo_url'; h.value = _photoData;
+            form.appendChild(h);
+          } else {
+            form.elements.photo_url.value = _photoData;
+          }
+        }
+        origSave && origSave();
+      };
+    };
+    reader.readAsDataURL(file);
+  };
+}
+
+function renderPhotoPreview(dataUrl) {
+  const prev = document.getElementById('bld-photo-preview');
+  if (!prev || !dataUrl) return;
+  prev.innerHTML = `<img src="${dataUrl}" style="max-height:120px;max-width:280px;border-radius:var(--radius);border:1px solid var(--border)">
+    <button class="btn btn-xs btn-danger" id="bld-photo-clear" style="margin-left:8px;vertical-align:bottom">✕ Remove</button>`;
+  document.getElementById('bld-photo-clear')?.addEventListener('click', () => {
+    prev.innerHTML = '';
+    const form = document.getElementById('bld-form');
+    if (form?.elements.photo_url) form.elements.photo_url.value = '';
+  });
 }
 
 function abbrevProv(full) {

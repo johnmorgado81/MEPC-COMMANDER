@@ -521,3 +521,8 @@ do $$ begin
   alter table equipment add column if not exists make                     text;
   -- make is legacy alias for manufacturer; keep both
 exception when others then null; end $$;
+
+-- v1.3 building photo
+do $$ begin
+  alter table buildings add column if not exists photo_url text;
+exception when others then null; end $$;

@@ -196,6 +196,20 @@ export const Proposals = {
           </div>
         </div>
 
+        ${(p.manual_items||[]).length ? `<div class="card" style="margin-top:14px">
+          <div class="card-header"><h3>Additional Line Items (${(p.manual_items||[]).length})</h3></div>
+          <div class="card-body no-pad">
+            <table class="table table-compact">
+              <thead><tr><th>Description</th><th>Qty</th><th>Value/yr</th><th>Notes</th><th>Client-Facing</th></tr></thead>
+              <tbody>${(p.manual_items||[]).map(m=>`<tr>
+                <td>${m.description||'—'}</td><td>${m.qty||1}</td>
+                <td>${m.value>0?formatCurrency(m.value*(m.qty||1)):m.value===0?'$0':'—'}</td>
+                <td style="font-size:11.5px;color:var(--text-muted)">${m.notes||''}</td>
+                <td>${m.client_facing?'<span style="color:var(--green);font-size:11px">✔ Yes</span>':'<span style="color:var(--text-muted);font-size:11px">Internal</span>'}</td>
+              </tr>`).join('')}</tbody>
+            </table>
+          </div>
+        </div>` : ''}
         ${p.notes ? `<div class="card" style="margin-top:14px"><div class="card-header"><h3>Notes</h3></div><div class="card-body"><p>${p.notes}</p></div></div>` : ''}
       </div>`;
 
