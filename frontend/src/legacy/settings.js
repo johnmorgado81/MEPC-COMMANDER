@@ -457,16 +457,35 @@ export const Settings = {
               <textarea name="company_blurb" class="input" rows="4" placeholder="e.g. MEC Mechanical Inc. is a full-service mechanical contracting company serving the Lower Mainland since 1987...">${c.company_blurb||''}</textarea>
             </div>
 
-            <div style="font-family:var(--font-cond);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin:16px 0 10px">Company Logo (used on PDF cover)</div>
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-              ${c.logo_data ? `<img src="${c.logo_data}" style="max-height:60px;max-width:180px;border:1px solid var(--border);border-radius:var(--radius)">` : '<span style="font-size:12px;color:var(--text-muted)">No logo uploaded</span>'}
-              <label class="btn btn-sm btn-secondary" style="cursor:pointer">
-                Upload Logo
-                <input type="file" id="logo-upload-inp" accept="image/*" style="display:none">
-              </label>
-              ${c.logo_data ? '<button type="button" class="btn btn-sm btn-danger" id="logo-clear-btn">Remove</button>' : ''}
+            <div style="font-family:var(--font-cond);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin:16px 0 10px">Company Logos</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px">
+              <div>
+                <div style="font-size:12px;font-weight:600;margin-bottom:6px">Logo — Light Background</div>
+                <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">Used in report body, client areas</div>
+                <div id="logo-light-preview" style="margin-bottom:6px">
+                  ${c.logo_light ? `<img src="${c.logo_light}" style="max-height:50px;max-width:160px;border:1px solid var(--border);border-radius:var(--radius);background:#f8f9fa;padding:4px">` : '<span style="font-size:11.5px;color:var(--text-muted)">No logo</span>'}
+                </div>
+                <label class="btn btn-xs btn-secondary" style="cursor:pointer;margin-right:4px">
+                  Upload <input type="file" id="logo-light-inp" accept="image/*" style="display:none">
+                </label>
+                ${c.logo_light ? '<button type="button" class="btn btn-xs btn-danger" id="logo-light-clear">✕</button>' : ''}
+                <input type="hidden" name="logo_light" id="logo-light-field" value="${c.logo_light||''}">
+              </div>
+              <div>
+                <div style="font-size:12px;font-weight:600;margin-bottom:6px">Logo — Dark Background</div>
+                <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">Used in headers (navy background)</div>
+                <div id="logo-dark-preview" style="margin-bottom:6px">
+                  ${c.logo_dark ? `<img src="${c.logo_dark}" style="max-height:50px;max-width:160px;border:1px solid var(--border);border-radius:var(--radius);background:#0b1223;padding:4px">` : '<span style="font-size:11.5px;color:var(--text-muted)">No logo</span>'}
+                </div>
+                <label class="btn btn-xs btn-secondary" style="cursor:pointer;margin-right:4px">
+                  Upload <input type="file" id="logo-dark-inp" accept="image/*" style="display:none">
+                </label>
+                ${c.logo_dark ? '<button type="button" class="btn btn-xs btn-danger" id="logo-dark-clear">✕</button>' : ''}
+                <input type="hidden" name="logo_dark" id="logo-dark-field" value="${c.logo_dark||''}">
+              </div>
             </div>
-            <input type="hidden" name="logo_data" id="logo-data-field" value="${c.logo_data||''}">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Backward compatible: if only one logo is uploaded it will be used for both contexts.</div>
+            <input type="hidden" name="logo_data" id="logo-data-field" value="${c.logo_dark||c.logo_light||c.logo_data||''}">
 
             <div style="margin-top:16px;display:flex;gap:8px">
               <button type="submit" class="btn btn-primary">Save Company Profile</button>
@@ -477,21 +496,36 @@ export const Settings = {
       </div>
     `;
 
-    // Logo upload
-    document.getElementById('logo-upload-inp')?.addEventListener('change', e => {
-      const file = e.target.files[0]; if (!file) return;
-      if (file.size > 2*1024*1024) { notify.warn('Logo must be under 2 MB.'); return; }
-      const reader = new FileReader();
-      reader.onload = ev => {
-        document.getElementById('logo-data-field').value = ev.target.result;
-        notify.success('Logo loaded. Save to persist.');
-      };
-      reader.readAsDataURL(file);
-    });
-    document.getElementById('logo-clear-btn')?.addEventListener('click', () => {
-      document.getElementById('logo-data-field').value = '';
-      notify.info('Logo removed. Save to persist.');
-    });
+    // Dual logo upload wiring
+    function wireLogoInp(inputId, fieldId, clearId, previewId, bgColor) {
+      document.getElementById(inputId)?.addEventListener('change', e => {
+        const file = e.target.files[0]; if (!file) return;
+        if (file.size > 2*1024*1024) { notify.warn('Logo must be under 2 MB.'); return; }
+        const reader = new FileReader();
+        reader.onload = ev => {
+          document.getElementById(fieldId).value = ev.target.result;
+          const prev = document.getElementById(previewId);
+          if (prev) prev.innerHTML = `<img src="${ev.target.result}" style="max-height:50px;max-width:160px;border:1px solid var(--border);border-radius:var(--radius);background:${bgColor};padding:4px">`;
+          // Also keep legacy logo_data in sync
+          document.getElementById('logo-data-field').value =
+            document.getElementById('logo-dark-field')?.value ||
+            document.getElementById('logo-light-field')?.value || '';
+          notify.success('Logo loaded. Save to persist.');
+        };
+        reader.readAsDataURL(file);
+      });
+      document.getElementById(clearId)?.addEventListener('click', () => {
+        document.getElementById(fieldId).value = '';
+        const prev = document.getElementById(previewId);
+        if (prev) prev.innerHTML = '<span style="font-size:11.5px;color:var(--text-muted)">No logo</span>';
+        document.getElementById('logo-data-field').value =
+          document.getElementById('logo-dark-field')?.value ||
+          document.getElementById('logo-light-field')?.value || '';
+        notify.info('Logo removed. Save to persist.');
+      });
+    }
+    wireLogoInp('logo-light-inp','logo-light-field','logo-light-clear','logo-light-preview','#f8f9fa');
+    wireLogoInp('logo-dark-inp', 'logo-dark-field', 'logo-dark-clear', 'logo-dark-preview', '#0b1223');
     document.getElementById('company-reset-btn')?.addEventListener('click', async () => {
       try { await UserSettings.set('company_profile', null); Object.assign(CONFIG.COMPANY, CONFIG.COMPANY); }
       catch {}
