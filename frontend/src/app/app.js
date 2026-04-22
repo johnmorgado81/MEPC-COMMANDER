@@ -94,6 +94,12 @@ function wireTopbar() {
 
 async function boot() {
   try { initDB(); } catch (e) { console.warn('DB init:', e.message); }
+  // Warm company profile cache from Supabase so pdf-export gets latest settings
+  try {
+    const { UserSettings } = await import('../legacy/db.js');
+    const saved = await UserSettings.get('company_profile');
+    if (saved) localStorage.setItem('mepc_company_profile', JSON.stringify(saved));
+  } catch {}
   try {
     const { EQUIPMASTER } = await import('../legacy/equipmaster.js');
     syncConfigFromEquipmaster(EQUIPMASTER);

@@ -3671,10 +3671,33 @@ export const EQUIPMASTER_CATEGORIES = [
 export function findEquipType(name) {
   if (!name) return null;
   const n = name.toLowerCase().trim();
-  return EQUIPMASTER.find(e => e.equipment_type.toLowerCase() === n) ||
-         EQUIPMASTER.find(e => n.includes(e.equipment_type.toLowerCase())) ||
-         EQUIPMASTER.find(e => e.equipment_type.toLowerCase().includes(n)) ||
-         null;
+
+  // Pass 1: exact match
+  const exact = EQUIPMASTER.find(e => e.equipment_type.toLowerCase() === n);
+  if (exact) return exact;
+
+  // Pass 2: input contains full type name — require word-boundary safety:
+  //   only accept if the matched type word-starts at position 0 or after a space
+  const contains = EQUIPMASTER.find(e => {
+    const et = e.equipment_type.toLowerCase();
+    const idx = n.indexOf(et);
+    if (idx === -1) return false;
+    const before = idx === 0 ? '' : n[idx - 1];
+    const after  = n[idx + et.length] || '';
+    return (before === '' || before === ' ') && (after === '' || after === ' ');
+  });
+  if (contains) return contains;
+
+  // Pass 3: type name contains input — same word-boundary check
+  const contained = EQUIPMASTER.find(e => {
+    const et = e.equipment_type.toLowerCase();
+    const idx = et.indexOf(n);
+    if (idx === -1) return false;
+    const before = idx === 0 ? '' : et[idx - 1];
+    const after  = et[idx + n.length] || '';
+    return (before === '' || before === ' ') && (after === '' || after === ' ');
+  });
+  return contained || null;
 }
 
 export function getStdHours(equipType, frequency) {

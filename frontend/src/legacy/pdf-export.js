@@ -7,9 +7,21 @@ function getjsPDF() { return window.jspdf.jsPDF; }
 function getCompany() {
   try {
     const saved = localStorage.getItem('mepc_company_profile');
-    if (saved) return { ...CONFIG.COMPANY, ...JSON.parse(saved) };
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // Full merge: saved profile takes priority, CONFIG fills any gaps
+      return { ...CONFIG.COMPANY, ...parsed };
+    }
   } catch {}
   return { ...CONFIG.COMPANY };
+}
+
+// Call this once at app startup or after settings save to warm the cache
+export async function warmCompanyCache(UserSettingsModule) {
+  try {
+    const saved = await UserSettingsModule.get('company_profile');
+    if (saved) localStorage.setItem('mepc_company_profile', JSON.stringify(saved));
+  } catch {}
 }
 
 // ─── Color palette ──────────────────────────────────────────────────────────────
@@ -177,126 +189,138 @@ export function generateProposalPDFEnhanced(proposal, building, coverImageDataUr
 
   // ─────────────────────────────────────────────────────────────────────────────
   // PAGE 1 — COVER
-  // Full-page dark background with photo bleed, overlaid client/building info
+  // Structure: [Company header band] [Photo] [Blue stripe] [Title + Client]
+  // Company branding lives in its own clean band — never overlays photo
   // ─────────────────────────────────────────────────────────────────────────────
   setFill(doc, C.navy); doc.rect(0, 0, pw, 279, 'F');
 
-  // Building photo — full-width, upper portion of page
-  const photoH = coverImg ? 130 : 0;
+  // ── COMPANY HEADER BAND (top 22mm, above photo) ───────────────────────────
+  const brandH = 22;
+  setFill(doc, C.navy); doc.rect(0, 0, pw, brandH, 'F');
+  setFill(doc, C.blue);  doc.rect(0, brandH, pw, 1.5, 'F');
+
+  // Logo: right side of brand band — aspect-ratio safe
+  let logoEndX = pw - ml;
+  if (co.logo_data) {
+    try {
+      const _clt = co.logo_data.match(/data:image\/(\w+)/)?.[1]?.toUpperCase() || 'PNG';
+      let _clw = 44, _clh = 14;
+      try {
+        const _clp = doc.getImageProperties(co.logo_data);
+        const _clr = Math.min(44/_clp.width, 14/_clp.height);
+        _clw = +(_clp.width * _clr).toFixed(1); _clh = +(_clp.height * _clr).toFixed(1);
+      } catch {}
+      doc.addImage(co.logo_data, _clt, pw - ml - _clw, (brandH - _clh) / 2, _clw, _clh, undefined, 'FAST');
+      logoEndX = pw - ml - _clw - 6;
+    } catch {}
+  }
+  // Company name + contact left of logo
+  setTxt(doc, C.white);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+  doc.text(co.name, ml, 10);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); setTxt(doc, [190, 205, 225]);
+  const coContact = [co.phone, co.email, co.website].filter(Boolean).join('  ·  ');
+  if (coContact) doc.text(coContact, ml, 16);
+  setTxt(doc, C.text);
+
+  // ── BUILDING PHOTO — starts below brand band, no text overlay ────────────
+  const photoStart = brandH + 1.5;
+  const photoMaxH  = coverImg ? 95 : 0;
+  let photoH = 0;
   if (coverImg) {
     try {
       const imgType = coverImg.match(/data:image\/(\w+)/)?.[1]?.toUpperCase() || 'JPEG';
-      let iw = pw, ih = photoH;
+      let iw = pw, ih = photoMaxH;
       try {
         const props = doc.getImageProperties(coverImg);
-        const ratio = Math.min(pw / props.width, photoH / props.height);
-        iw = +(props.width * ratio).toFixed(1);
-        ih = +(props.height * ratio).toFixed(1);
+        const ratio = Math.min(pw / props.width, photoMaxH / props.height);
+        iw = +(props.width * ratio).toFixed(1); ih = +(props.height * ratio).toFixed(1);
       } catch {}
       const ix = (pw - iw) / 2;
-      doc.addImage(coverImg, imgType, ix, 0, iw, ih, undefined, 'FAST');
-      // Gradient overlay — bottom of photo fades into navy
-      setFill(doc, C.navy); doc.setGState && doc.setGState(new doc.GState({ opacity: 0.5 }));
-      doc.rect(0, ih - 30, pw, 30, 'F');
+      doc.addImage(coverImg, imgType, ix, photoStart, iw, ih, undefined, 'FAST');
+      photoH = ih;
+      // Subtle dark fade at bottom of photo
+      setFill(doc, C.navy);
+      doc.setGState && doc.setGState(new doc.GState({ opacity: 0.45 }));
+      doc.rect(0, photoStart + ih - 20, pw, 20, 'F');
       doc.setGState && doc.setGState(new doc.GState({ opacity: 1 }));
     } catch {}
   }
 
-  // Blue accent stripe
-  const stripeY = photoH > 0 ? photoH : 40;
+  // ── BLUE ACCENT STRIPE (below photo) ───────────────────────────────────────
+  const stripeY = photoStart + photoH;
   setFill(doc, C.blue); doc.rect(0, stripeY, pw, 2, 'F');
 
-  // Company brand block — top left overlay on photo
+  // ── CONTENT AREA — fixed layout below stripe, above bottom 40mm ────────────
+  // Two-column: left=title+client, right=pricing summary
+  const contentTop = stripeY + 2;
+  const contentH   = 279 - contentTop - 2;   // remaining page height
+  const halfW      = (mr - ml) / 2 - 5;
+
+  // Left column: title + prepared for
+  let ty = contentTop + 8;
   setTxt(doc, C.white);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5);
-  doc.text(co.name, ml, 10);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
-  setTxt(doc, [200, 210, 230]);
-  doc.text(`${co.phone}  ·  ${co.email}`, ml, 15);
-  if (co.website) doc.text(co.website, ml, 19);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(20);
+  doc.text('PREVENTIVE MAINTENANCE', ml, ty); ty += 9;
+  setTxt(doc, C.blueAcc); doc.setFontSize(22);
+  doc.text('PROPOSAL', ml, ty); ty += 9;
+  setTxt(doc, [180, 196, 220]); doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5);
+  doc.text(proposal.title || (visitLabels + ' PM Agreement'), ml, ty); ty += 10;
 
-  // Logo top-right on cover — aspect-ratio preserved
-  if (co.logo_data) {
-    try {
-      const _clt = co.logo_data.match(/data:image\/(\w+)/)?.[1]?.toUpperCase() || 'PNG';
-      let _clw = 42, _clh = 16;
-      try {
-        const _clp = doc.getImageProperties(co.logo_data);
-        const _clr = Math.min(42/_clp.width, 16/_clp.height);
-        _clw = +(_clp.width * _clr).toFixed(1);
-        _clh = +(_clp.height * _clr).toFixed(1);
-      } catch {}
-      doc.addImage(co.logo_data, _clt, pw - ml - _clw, 5, _clw, _clh, undefined, 'FAST');
-    } catch {}
-  }
+  // Divider
+  setFill(doc, C.blue); doc.rect(ml, ty, halfW, 0.8, 'F'); ty += 5;
 
-  // Main title block — below stripe
-  let ty = stripeY + 10;
-
-  setTxt(doc, C.white);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(24);
-  const titleLines = doc.splitTextToSize('PREVENTIVE MAINTENANCE', pw - ml * 2);
-  doc.text(titleLines, ml, ty);
-  ty += titleLines.length * 10;
-  setTxt(doc, C.blueAcc);
-  doc.setFontSize(24);
-  doc.text('PROPOSAL', ml, ty); ty += 12;
-
-  setTxt(doc, [200, 210, 230]);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-  doc.text(proposal.title || `${visitLabels} PM Agreement`, ml, ty); ty += 16;
-
-  // Client info block
-  setFill(doc, [255,255,255]); doc.setGState && doc.setGState(new doc.GState({ opacity: 0.06 }));
-  doc.rect(ml - 2, ty - 6, mr - ml + 4, 52, 'F');
-  doc.setGState && doc.setGState(new doc.GState({ opacity: 1 }));
-
-  setTxt(doc, [160, 174, 192]);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
+  // PREPARED FOR block
+  setTxt(doc, [140, 158, 185]); doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
   doc.text('PREPARED FOR', ml, ty); ty += 5;
-
-  setTxt(doc, C.white);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(14);
+  setTxt(doc, C.white); doc.setFont('helvetica', 'bold'); doc.setFontSize(13);
   const clientName = building?.client_name || building?.client_company || building?.name || 'To Be Confirmed';
-  const clines = doc.splitTextToSize(clientName, mr - ml - 4);
-  doc.text(clines, ml, ty); ty += clines.length * 7;
-
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
-  setTxt(doc, [200, 210, 230]);
-  if (building?.client_company && building?.client_name) { doc.text(building.client_company, ml, ty); ty += 5; }
-  const bname = building?.name || '';
-  if (bname) { doc.text(bname, ml, ty); ty += 5; }
-  if (building?.strata_number) { doc.text(`Strata Plan ${building.strata_number}`, ml, ty); ty += 5; }
+  const clines = doc.splitTextToSize(clientName, halfW);
+  doc.text(clines, ml, ty); ty += clines.length * 6.5;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); setTxt(doc, [200, 215, 235]);
+  if (building?.client_company && building?.client_name) {
+    const ccl = doc.splitTextToSize(building.client_company, halfW);
+    doc.text(ccl, ml, ty); ty += ccl.length * 5;
+  }
+  if (building?.name && building.name !== clientName) {
+    const bnl = doc.splitTextToSize(building.name, halfW);
+    doc.text(bnl, ml, ty); ty += bnl.length * 5;
+  }
+  if (building?.strata_number) { doc.text('Strata Plan ' + building.strata_number, ml, ty); ty += 5; }
   const addrLine = [building?.address, building?.city, building?.province].filter(Boolean).join(', ');
-  if (addrLine) { const al = doc.splitTextToSize(addrLine, mr - ml - 4); doc.text(al, ml, ty); ty += al.length * 5; }
-  ty += 4;
+  if (addrLine) { const al = doc.splitTextToSize(addrLine, halfW); doc.text(al, ml, ty); }
 
-  // Proposal metadata chips — bottom of cover
-  setTxt(doc, [160, 174, 192]);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
-  const meta = [
-    `#${proposal.proposal_number || 'DRAFT'}`,
-    formatDate(proposal.created_date),
-    `Valid to ${formatDate(proposal.valid_until)}`,
-    `${visitCount} visits/yr`,
-  ].filter(Boolean);
-  let mx = ml;
-  meta.forEach(m => {
-    setFill(doc, [255,255,255]); doc.setGState && doc.setGState(new doc.GState({ opacity: 0.1 }));
-    const mw = doc.getTextWidth(m) + 8;
-    doc.roundedRect(mx, 262, mw, 6, 1, 1, 'F');
-    doc.setGState && doc.setGState(new doc.GState({ opacity: 1 }));
-    setTxt(doc, [220, 230, 240]); doc.text(m, mx + 4, 266);
-    mx += mw + 4;
+  // Right column: pricing + proposal details
+  const rx = ml + halfW + 10;
+  let ry = contentTop + 8;
+
+  // Annual value box
+  setFill(doc, [255,255,255]); doc.setGState && doc.setGState(new doc.GState({ opacity: 0.08 }));
+  doc.rect(rx, ry - 4, halfW, 26, 'F');
+  doc.setGState && doc.setGState(new doc.GState({ opacity: 1 }));
+  setTxt(doc, [140, 158, 185]); doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5);
+  doc.text('ANNUAL CONTRACT VALUE', rx + 4, ry); ry += 7;
+  setTxt(doc, C.white); doc.setFont('helvetica', 'bold'); doc.setFontSize(18);
+  doc.text(formatCurrency(annual), rx + 4, ry); ry += 10;
+  setTxt(doc, [180, 196, 220]); doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5);
+  doc.text(formatCurrency(monthly) + ' / month', rx + 4, ry); ry += 12;
+
+  // Proposal detail rows
+  const detailRows = [
+    ['Proposal #', proposal.proposal_number || 'DRAFT'],
+    ['Date', formatDate(proposal.created_date)],
+    ['Valid Until', formatDate(proposal.valid_until)],
+    ['Service Visits', visitLabels + ' (' + visitCount + '/yr)'],
+    ['Payment', proposal.payment_terms || 'Net 30'],
+  ].filter(r => r[1]);
+  doc.setFontSize(8);
+  detailRows.forEach(([k, v]) => {
+    setTxt(doc, [140, 158, 185]); doc.setFont('helvetica', 'bold'); doc.text(k + ':', rx + 4, ry);
+    setTxt(doc, C.white); doc.setFont('helvetica', 'normal');
+    const vl = doc.splitTextToSize(v, halfW - 40);
+    doc.text(vl, rx + halfW - 2, ry, { align: 'right' });
+    ry += 5.5;
   });
-
-  // Annual value — bottom right of cover
-  setTxt(doc, [160, 174, 192]); doc.setFontSize(7); doc.setFont('helvetica', 'bold');
-  doc.text('ANNUAL CONTRACT VALUE', pw - ml, 260, { align: 'right' });
-  setTxt(doc, C.white); doc.setFontSize(18); doc.setFont('helvetica', 'bold');
-  doc.text(formatCurrency(annual), pw - ml, 270, { align: 'right' });
-  setTxt(doc, [160, 174, 192]); doc.setFontSize(8); doc.setFont('helvetica', 'normal');
-  doc.text(`${formatCurrency(monthly)} / month`, pw - ml, 275, { align: 'right' });
 
   addFooter(doc, page.n, proposal);
 

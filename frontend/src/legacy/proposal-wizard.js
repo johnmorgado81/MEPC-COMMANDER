@@ -1,6 +1,6 @@
 // proposal-wizard.js — PM Quote MVP
 // Steps: Building → Equipment → Price + Subcontractors → Generate
-import { Proposals as DB, Buildings as BuildingsDB } from './db.js';
+import { Proposals as DB, Buildings as BuildingsDB, Equipment as EquipmentDB } from './db.js';
 import { CONFIG } from './config.js';
 import { sellFromHours, stdHours, deriveVisitCount as _engineVisitCount, assetToScopeItem } from './pm-engine.js';
 import { EQUIPMASTER, EQUIPMASTER_MANUFACTURERS, findEquipType, getStdHours, CATEGORIES } from './equipmaster.js';
@@ -277,9 +277,14 @@ function _saveBldFields() {
 
 // ─── Step 2 — Equipment ───────────────────────────────────────────────────────
 async function _step2(el, wiz) {
+  const hasSavedBuilding = !!S.building.building_id;
   el.innerHTML = `<div class="wiz-card">
     <h3>Equipment List</h3>
     <p class="text-muted" style="margin-bottom:.75rem">Enter all equipment in scope. Type matches EQUIPMASTER for automatic time estimates.</p>
+    ${hasSavedBuilding ? `<div class="alert" style="background:var(--bg3);border:1px solid var(--blue);border-radius:var(--radius);padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <span style="font-size:12.5px">Building <strong>${S.building.name||''}</strong> has a saved equipment registry.</span>
+      <button class="btn btn-sm btn-primary" id="load-registry-btn">📋 Load from Registry</button>
+    </div>` : ''}
     <div id="equip-parse-status"></div>
     <div id="equip-table-wrap">${_renderRawEquipTable()}</div>
     <div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
@@ -299,6 +304,47 @@ async function _step2(el, wiz) {
 
   document.getElementById('s2-back').onclick = () => { _saveRawTable(); wiz.back(); };
   document.getElementById('s2-next').onclick = () => { _saveRawTable(); S.normalized = []; wiz.next(); };
+
+  document.getElementById('load-registry-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('load-registry-btn');
+    btn.disabled = true; btn.textContent = 'Loading…';
+    try {
+      const assets = await EquipmentDB.getByBuilding(S.building.building_id);
+      if (!assets?.length) { document.getElementById('equip-parse-status').innerHTML = '<div class="badge badge-warn">No equipment found in registry for this building.</div>'; return; }
+      _saveRawTable();
+      let added = 0;
+      for (const a of assets) {
+        const tag  = a.tag || '';
+        const type = a.equipment_type || 'Other';
+        const dup  = S.rawEquipment.find(e => e.tag === tag && e.type === type);
+        if (!dup) {
+          S.rawEquipment.push({
+            type,
+            tag,
+            manufacturer: a.manufacturer || a.make || '',
+            model:        a.model || '',
+            qty:          parseInt(a.qty) || 1,
+            location:     a.location || '',
+            service_area: a.service_area || 'common_strata',
+            category:     a.category || '',
+            source:       'registry',
+            equipment_id: a.id,
+            type_raw:     a.equipment_type_raw || type,
+            _review:      false,
+          });
+          added++;
+        }
+      }
+      document.getElementById('equip-table-wrap').innerHTML = _renderRawEquipTable();
+      _bindRawTable();
+      document.getElementById('equip-parse-status').innerHTML = `<div class="badge badge-success">Loaded ${added} equipment item${added!==1?'s':''} from registry.${assets.length-added>0?' '+( assets.length-added)+' already present.':''}</div>`;
+    } catch(err) {
+      document.getElementById('equip-parse-status').innerHTML = `<div class="badge badge-danger">Registry load failed: ${err.message}</div>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '📋 Load from Registry'; }
+    }
+  });
+
   document.getElementById('add-equip-row').onclick = () => {
     _saveRawTable();
     S.rawEquipment.push({ type:'', tag:'', manufacturer:'', model:'', qty:1, location:'', source:'manual' });
@@ -330,7 +376,15 @@ async function _step2(el, wiz) {
           e.type === item.type && e.tag === item.tag &&
           (item._review ? e._rowHint === item._rowHint : true)
         );
-        if (!dup) S.rawEquipment.push(item);
+        if (!dup) {
+          // Normalize type through aliases before adding — prevents type drift to Step 3
+          const resolved = _resolveType(item.type);
+          if (resolved && item.type && !item._review) {
+            item.type_raw = item.type;
+            item.type = resolved.equipment_type;
+          }
+          S.rawEquipment.push(item);
+        }
       }
       document.getElementById('equip-table-wrap').innerHTML = _renderRawEquipTable();
       _bindRawTable();
@@ -698,8 +752,46 @@ async function _step3(el, wiz) {
 }
 
 // ─── Equipment pricing table ──────────────────────────────────────────────────
+// Explicit type aliases for common OCR/import variations that elude EQUIPMASTER lookup
+const WIZ_TYPE_ALIASES = {
+  'Hot Water Boiler':       ['hwb','hw boiler','heating boiler','gas boiler','fire tube','low pressure boiler','cast iron boiler','boiler','htg boiler'],
+  'Condensing Boiler':      ['condensing boiler','mod con','modcon','condensing gas boiler','high eff boiler','condensing hwb'],
+  'Steam Boiler':           ['steam boiler','high pressure boiler','lp steam'],
+  'Circulator Pump':        ['circ pump','circulator','circulat','circ.','circulators'],
+  'Heating Water Pump':     ['hwp','hhwp','heating pump','hw pump','hx pump','primary pump','secondary pump','system pump','heating water pump','boiler pump'],
+  'Condenser Water Pump':   ['cwp','cond pump','condenser pump','cond water pump'],
+  'Chilled Water Pump':     ['chwp','chw pump','chilled pump','chilled water pump'],
+  'DHW Recirculation Pump': ['dhwp','dhw pump','hw recirc','recirc pump','hot water recirculation','dhw recirc'],
+  'Domestic Booster Pump':  ['domestic booster','db pump','pressure booster','boost pump'],
+  'Heat Pump':              ['hp unit','geothermal pump','water source heat pump','wshp'],
+  'Air Handling Unit':    ['ahu','air handler','air handling','doas unit'],
+  'Rooftop Unit':         ['rtu','packaged rooftop','rooftop'],
+  'Fan Coil Unit':        ['fcu','fan coil'],
+  'Make-Up Air Unit':     ['mau','makeup air','make up air','make-up air'],
+  'Chiller':              ['ch-','chiller unit','water chiller','air cooled chiller','centrifugal chiller'],
+  'Cooling Tower':        ['ct-','cooling tower','evaporative cooler'],
+  'Plate Heat Exchanger': ['phe','heat exchanger','b&g','plate exchanger','hx'],
+  'Exhaust Fan':          ['ef-','exhaust fan','ex fan'],
+  'Variable Frequency Drive': ['vfd','variable speed','vsd'],
+  'Backflow Preventer':   ['bfp','backflow','rp device'],
+  'Domestic Water Heater': ['dhw heater','water heater','hwt','hot water tank'],
+  'Expansion Tank':       ['exp tank','expansion vessel','bladder tank'],
+};
+
+function _resolveType(rawType) {
+  if (!rawType) return null;
+  const lower = rawType.toLowerCase().trim();
+  // Check explicit aliases first
+  for (const [canonical, aliases] of Object.entries(WIZ_TYPE_ALIASES)) {
+    if (aliases.some(a => lower === a || lower.includes(a) || a.includes(lower))) {
+      return findEquipType(canonical) || null;
+    }
+  }
+  return findEquipType(rawType);
+}
+
 function _normalizeItem(raw) {
-  const match = findEquipType(raw.type);
+  const match = _resolveType(raw.type);
   let conf = 'unknown', qtrHrs = 1.0, annHrs = 4.0, category = raw.category || 'Other', equipmaster = null;
   if (match) {
     equipmaster = match.equipment_type;
@@ -708,17 +800,32 @@ function _normalizeItem(raw) {
     annHrs      = match.annual_hours    || 4.0;
     conf = match.equipment_type.toLowerCase() === (raw.type||'').toLowerCase() ? 'exact' : 'strong';
   } else {
-    const words = (raw.type||'').toLowerCase().split(/\s+/).filter(w => w.length > 3);
-    const partial = words.length ? (EQUIPMASTER||[]).find(e => words.some(w => e.equipment_type.toLowerCase().includes(w))) : null;
-    if (partial) {
-      equipmaster = partial.equipment_type;
-      category    = raw.category || partial.category || 'Other';
-      qtrHrs = partial.quarterly_hours||1; annHrs = partial.annual_hours||4; conf = 'review';
+    // Score-ranked partial — avoid single short words like "unit" silently matching "Condensing Unit"
+    const words = (raw.type||'').toLowerCase().split(/[\s\-_\/]+/).filter(w => w.length > 4);
+    let bestMatch = null, bestScore = 0;
+    if (words.length) {
+      (EQUIPMASTER||[]).forEach(e => {
+        const et = e.equipment_type.toLowerCase();
+        let score = 0;
+        words.forEach(w => {
+          if (et === w) score += 10;
+          else if (et.startsWith(w + ' ') || et.endsWith(' ' + w)) score += 6;
+          else if (et.includes(' ' + w + ' ')) score += 6;
+          else if (et.includes(w) && w.length > 5) score += 2;
+        });
+        if (score > bestScore) { bestScore = score; bestMatch = e; }
+      });
+    }
+    if (bestMatch && bestScore >= 6) {
+      equipmaster = bestMatch.equipment_type;
+      category    = raw.category || bestMatch.category || 'Other';
+      qtrHrs = bestMatch.quarterly_hours||1; annHrs = bestMatch.annual_hours||4; conf = 'review';
     }
   }
   const annCleanHrs = match ? (match.annual_hours || 0) : (qtrHrs * 2);
   const n = { ...raw, equipmaster, conf, category, qtrHrs, annHrs, annCleanHrs, frequency: S.frequency,
     manufacturer: raw.manufacturer || '', model: raw.model || '',
+    type_raw: raw.type || '',  // preserve original parsed text
     // Per-row visit controls — default from global S.quarterVisits
     itemQV: { ...S.quarterVisits } };
   n.annual_price = _calcPrice(n);
@@ -836,10 +943,14 @@ function _bindNormTable() {
       const i = Number(btn.dataset.i); _saveNormTable();
       const match = findEquipType(S.normalized[i].equipmaster || S.normalized[i].type);
       if (match) {
-        S.normalized[i].qtrHrs      = match.quarterly_hours || 1;
-        S.normalized[i].annCleanHrs = match.annual_hours    || 0;
-        S.normalized[i].annHrs      = match.annual_hours    || 4;
-        S.normalized[i].annual_price = _calcPrice(S.normalized[i]);
+        S.normalized[i].qtrHrs          = match.quarterly_hours || 1;
+        S.normalized[i].qtrHrsStd       = match.quarterly_hours || 1;
+        S.normalized[i].annCleanHrs     = match.annual_hours    || 0;
+        S.normalized[i].annCleanHrsStd  = match.annual_hours    || 0;
+        S.normalized[i].annHrs          = match.annual_hours    || 4;
+        S.normalized[i]._qhOverride     = false;
+        S.normalized[i]._achOverride    = false;
+        S.normalized[i].annual_price    = _calcPrice(S.normalized[i]);
       }
       rerender();
     };
@@ -851,15 +962,18 @@ function _bindNormTable() {
       const i = Number(inp.dataset.i); _saveNormTable();
       const match = findEquipType(inp.value);
       if (match) {
+        const isQHOvr  = S.normalized[i]._qhOverride;
+        const isACHOvr = S.normalized[i]._achOverride;
         Object.assign(S.normalized[i], {
-          equipmaster:  match.equipment_type,
-          category:     match.category || '',
-          qtrHrs:       match.quarterly_hours || 1,
-          annHrs:       match.annual_hours    || 4,
-          annCleanHrs:  match.annual_hours    || 0,
-          conf:         'strong',
-          // Refresh scope lines immediately so saved proposal gets correct text
-          scope_lines:  getScopeText(match.equipment_type, S.frequency || 'quarterly') || [],
+          equipmaster:     match.equipment_type,
+          category:        match.category || '',
+          qtrHrs:          isQHOvr  ? S.normalized[i].qtrHrs     : (match.quarterly_hours || 1),
+          qtrHrsStd:       match.quarterly_hours || 1,
+          annHrs:          match.annual_hours    || 4,
+          annCleanHrs:     isACHOvr ? S.normalized[i].annCleanHrs : (match.annual_hours || 0),
+          annCleanHrsStd:  match.annual_hours || 0,
+          conf:            'strong',
+          scope_lines:     getScopeText(match.equipment_type, S.frequency || 'quarterly') || [],
         });
         S.normalized[i].annual_price = _calcPrice(S.normalized[i]);
       }
@@ -873,6 +987,8 @@ function _bindNormTable() {
       const i = Number(inp.dataset.i); const f = inp.dataset.f;
       if (!S.normalized[i]) return;
       S.normalized[i][f] = ['qty','qtrHrs','annHrs','annCleanHrs'].includes(f) ? Number(inp.value)||0 : inp.value;
+      if (f === 'qtrHrs')      S.normalized[i]._qhOverride  = true;
+      if (f === 'annCleanHrs') S.normalized[i]._achOverride = true;
       // Recalculate price immediately
       if (['qty','qtrHrs','annHrs','annCleanHrs'].includes(f)) {
         S.normalized[i].annual_price = _calcPrice(S.normalized[i]);
