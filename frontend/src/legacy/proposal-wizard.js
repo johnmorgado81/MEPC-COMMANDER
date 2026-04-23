@@ -848,6 +848,32 @@ async function _step3(el, wiz) {
       S.frequency = _deriveFrequency();
       _updateVisitSummary();
       _saveNormTable();
+
+      // GLOBAL ANNUAL TOGGLE: propagate annual_clean to ALL item-level itemQV rows
+      if (chk.dataset.q === 'annual_clean') {
+        const annVal = chk.checked;
+        S.normalized.forEach(n => {
+          if (!n.itemQV) n.itemQV = { ...S.quarterVisits };
+          n.itemQV.annual_clean = annVal;
+        });
+        // Sync all visible item-qv-chk[annual_clean] checkboxes
+        document.querySelectorAll('.item-qv-chk[data-q="annual_clean"]').forEach(cb => {
+          cb.checked = annVal;
+          // Update the label colour
+          const span = cb.closest('label')?.querySelector('span');
+          if (span) span.style.color = annVal ? 'var(--orange)' : 'var(--text-muted)';
+        });
+        // Update visit summary labels per row
+        document.querySelectorAll('tr[data-qv]').forEach(tr => {
+          const i = parseInt(tr.dataset.qv);
+          if (!S.normalized[i]) return;
+          const v = S.normalized[i].itemQV;
+          const cnt = [v.q1,v.q2,v.q3,v.q4].filter(Boolean).length;
+          const sumEl = tr.querySelector('span:last-child');
+          if (sumEl) sumEl.textContent = cnt+' visit'+(cnt!==1?'s':'')+'/yr'+(v.annual_clean?'+Clean':'');
+        });
+      }
+
       S.normalized.forEach(n => { n.frequency = S.frequency; n.annual_price = _calcPrice(n); });
       document.getElementById('norm-table-wrap').innerHTML = _renderNormTable();
       _bindNormTable();
@@ -1158,6 +1184,18 @@ function _bindNormTable() {
       const cnt = [v.q1,v.q2,v.q3,v.q4].filter(Boolean).length;
       const sumEl = document.querySelector(`tr[data-qv="${i}"] span:last-child`);
       if (sumEl) sumEl.textContent = cnt+' visit'+(cnt!==1?'s':'')+'/yr'+(v.annual_clean?'+Clean':'');
+      // Sync global annual checkbox: all on → global on, all off → global off, mixed → indeterminate
+      if (chk.dataset.q === 'annual_clean') {
+        const allOn  = S.normalized.every(n => (n.itemQV||S.quarterVisits).annual_clean);
+        const allOff = S.normalized.every(n => !(n.itemQV||S.quarterVisits).annual_clean);
+        const globalChk = document.getElementById('wiz-annual-clean');
+        if (globalChk) {
+          globalChk.checked = allOn;
+          globalChk.indeterminate = !allOn && !allOff;
+          S.quarterVisits.annual_clean = allOn;
+          _updateVisitSummary();
+        }
+      }
       _refreshTotals();
     };
   });

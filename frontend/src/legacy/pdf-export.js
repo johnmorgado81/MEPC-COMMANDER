@@ -62,22 +62,22 @@ function addFooter(doc, page, proposal) {
   const wb  = co.website || 'www.mecmechanical.ca';
   const coName = co.name || 'MEC Mechanical Inc.';
 
-  // jsPDF letter = 279.4mm. Safe footer zone: bottom margin 12mm → line at 267.4, text at 272.
-  const pageH   = 279.4;
-  const margin  = 12;          // mm from page bottom
-  const lineY   = pageH - margin - 4;   // divider at ~263
-  const textY   = pageH - margin;       // text baseline at ~267
+  // jsPDF letter = 279.4mm. Footer baseline at pageH-10 = 269.4mm
+  const pageH  = 279.4;
+  const textY  = pageH - 10;   // 269.4mm — safely inside printable area
+  const lineY  = textY - 4;    // divider 4mm above text
 
-  // Divider line
-  sd(doc, [210,210,210]); doc.setLineWidth(0.25);
+  // Divider — very light grey, thin
+  sd(doc, [215,220,225]); doc.setLineWidth(0.2);
   doc.line(ml, lineY, mr, lineY);
 
-  // Footer text — left zone: contact, right zone: page number
-  doc.setFontSize(8); doc.setFont('helvetica','normal'); st(doc, [150,150,150]);
+  // Left: contact info
+  doc.setFontSize(8); doc.setFont('helvetica','normal'); st(doc, [130,140,150]);
   doc.text(`${coName}  ·  ${ph}  ·  ${em}  ·  ${wb}`, ml, textY);
+
+  // Right: page number
   doc.text(`Page ${page}`, mr, textY, {align:'right'});
 
-  // Reset
   doc.setLineWidth(0.2); st(doc, C.text);
 }
 
@@ -136,7 +136,7 @@ function typeHead(doc, text, count, y) {
 
 // ─── Page guard ───────────────────────────────────────────────────────────────
 function chk(doc, y, need, page, proposal, title) {
-  if (y + need > 258) {  // stop before 267mm footer zone
+  if (y + need > 256) {  // stop before 269mm footer zone
     addFooter(doc, page.n, proposal);
     doc.addPage(); page.n++;
     y = addHeader(doc, title||'PLANNED MAINTENANCE PROPOSAL', `#${proposal?.proposal_number||'DRAFT'}`);
@@ -514,26 +514,29 @@ export function generateProposalPDFEnhanced(proposal, building, coverImageDataUr
     y += 4;
   });
 
-  // Count summary
-  y = chk(doc, y, 14, page, proposal, 'Schedule A: Equipment List Contd.');
+  // Count summary — two-column aligned table, no mid-row page breaks
+  const totU = equipItems.reduce((s,i)=>s+(Number(i.qty)||1),0);
+  const summaryRows = tOrder.map(t => {
+    const q = tGroups[t].reduce((s,i)=>s+(Number(i.qty)||1),0);
+    return [t, q+' unit'+(q!==1?'s':'')];
+  });
+  const needH = 14 + summaryRows.length * 6 + 10;
+  y = chk(doc, y, needH, page, proposal, 'Schedule A: Equipment List Contd.');
   y += 4;
   sd(doc, [200,210,225]); doc.setLineWidth(0.3); doc.line(ml, y, mr, y); y += 5;
   doc.setFont('helvetica','bold'); doc.setFontSize(8); st(doc, C.charcoal);
   doc.text('EQUIPMENT COUNT BY TYPE', ml, y); y += 6;
-  const cW2 = (mr-ml)/3;
-  doc.setFont('helvetica','normal'); doc.setFontSize(7.5); st(doc, C.text);
-  tOrder.forEach((t,idx) => {
-    const col=idx%3; const row=Math.floor(idx/3);
-    const q=tGroups[t].reduce((s,i)=>s+(Number(i.qty)||1),0);
-    const x=ml+col*cW2; const yy=y+row*5;
-    if(col===0) y=chk(doc,yy,5,page,proposal,'Schedule A: Equipment List Contd.');
-    doc.text(t+':', x, yy);
-    st(doc,C.blue); doc.setFont('helvetica','bold');
-    doc.text(q+' unit'+(q!==1?'s':''), x+cW2-6, yy, {align:'right'});
-    st(doc,C.text); doc.setFont('helvetica','normal');
+  const labelCol = ml + 4;
+  const countCol = ml + 100;  // fixed right-align column for counts
+  summaryRows.forEach(([type, countStr], idx) => {
+    if (idx % 2 === 0) { sf(doc, C.offwhite); doc.rect(ml, y-3, mr-ml, 5.5, 'F'); }
+    doc.setFont('helvetica','normal'); doc.setFontSize(8); st(doc, C.text);
+    doc.text(type, labelCol, y);
+    st(doc, C.blue); doc.setFont('helvetica','bold');
+    doc.text(countStr, countCol, y);
+    st(doc, C.text); y += 5.5;
   });
-  const totU = equipItems.reduce((s,i)=>s+(Number(i.qty)||1),0);
-  y += Math.ceil(tOrder.length/3)*5+4;
+  y += 2;
   sf(doc, C.navy); doc.rect(ml, y-3, mr-ml, 7, 'F');
   st(doc, C.white); doc.setFont('helvetica','bold'); doc.setFontSize(8.5);
   doc.text(`Total: ${totU} units across ${tOrder.length} equipment type${tOrder.length!==1?'s':''}`, ml+4, y+1);
