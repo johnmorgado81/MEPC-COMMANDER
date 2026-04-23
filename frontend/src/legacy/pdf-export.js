@@ -57,17 +57,28 @@ function drawLogo(doc, co, x, y, maxW, maxH, variant) {
 // ─── Footer: minimal centered line, no background ────────────────────────────
 function addFooter(doc, page, proposal) {
   const co = getCompany();
-  const ph = co.contact_phone || co.phone || '604-298-8383';
-  const em = co.email || 'john@mecmechanical.ca';
-  const wb = co.website || 'www.mecmechanical.ca';
-  st(doc, [155,155,155]);
-  doc.setFontSize(7); doc.setFont('helvetica','normal');
-  const footerY = 285;
-  doc.text(`${co.name||'MEC Mechanical Inc.'}  ·  ${ph}  ·  ${em}  ·  ${wb}`, pw/2, footerY, {align:'center'});
-  if (proposal?.proposal_number) {
-    doc.text(`Page ${page}`, mr, footerY, {align:'right'});
-  }
-  st(doc, C.text);
+  const ph  = co.contact_phone || co.phone || '604-690-8083';
+  const em  = co.email  || 'john@mecmechanical.ca';
+  const wb  = co.website || 'www.mecmechanical.ca';
+  const coName = co.name || 'MEC Mechanical Inc.';
+
+  // jsPDF letter = 279.4mm. Safe footer zone: bottom margin 12mm → line at 267.4, text at 272.
+  const pageH   = 279.4;
+  const margin  = 12;          // mm from page bottom
+  const lineY   = pageH - margin - 4;   // divider at ~263
+  const textY   = pageH - margin;       // text baseline at ~267
+
+  // Divider line
+  sd(doc, [210,210,210]); doc.setLineWidth(0.25);
+  doc.line(ml, lineY, mr, lineY);
+
+  // Footer text — left zone: contact, right zone: page number
+  doc.setFontSize(8); doc.setFont('helvetica','normal'); st(doc, [150,150,150]);
+  doc.text(`${coName}  ·  ${ph}  ·  ${em}  ·  ${wb}`, ml, textY);
+  doc.text(`Page ${page}`, mr, textY, {align:'right'});
+
+  // Reset
+  doc.setLineWidth(0.2); st(doc, C.text);
 }
 
 // ─── Header: logo left | title centered | # right — slim navy bar ─────────────
@@ -125,7 +136,7 @@ function typeHead(doc, text, count, y) {
 
 // ─── Page guard ───────────────────────────────────────────────────────────────
 function chk(doc, y, need, page, proposal, title) {
-  if (y + need > 268) {
+  if (y + need > 258) {  // stop before 267mm footer zone
     addFooter(doc, page.n, proposal);
     doc.addPage(); page.n++;
     y = addHeader(doc, title||'PLANNED MAINTENANCE PROPOSAL', `#${proposal?.proposal_number||'DRAFT'}`);
