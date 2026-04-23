@@ -295,6 +295,7 @@ async function _step2(el, wiz) {
         <input type="file" id="equip-file-inp" accept=".pdf,.docx,.xlsx,.xls" style="display:none">
       </label>
       <button class="btn btn-sm btn-primary" id="parse-files-btn" style="display:none">⟳ Parse File</button>
+      <button class="btn btn-sm btn-secondary" id="save-to-registry-btn" title="Save extracted rows to building registry before proposal generation">💾 Save to Registry</button>
       <span id="file-name-label" class="text-muted" style="font-size:12px"></span>
     </div>
     <div class="wiz-actions">
@@ -314,24 +315,30 @@ async function _step2(el, wiz) {
       if (!assets?.length) { document.getElementById('equip-parse-status').innerHTML = '<div class="badge badge-warn">No equipment found in registry for this building.</div>'; return; }
       _saveRawTable();
       let added = 0;
-      for (const a of assets) {
+      // Prefer verified/proposal_ready rows; include all if none are verified
+      const readyStatuses = new Set(['verified','proposal_ready','normalized','ok']);
+      const verifiedSet = assets.filter(a => readyStatuses.has(a.ingestion_status) || (a.review_status !== 'needs-review'));
+      const sourceSet   = verifiedSet.length ? verifiedSet : assets;
+      for (const a of sourceSet) {
         const tag  = a.tag || '';
         const type = a.equipment_type || 'Other';
         const dup  = S.rawEquipment.find(e => e.tag === tag && e.type === type);
         if (!dup) {
           S.rawEquipment.push({
             type,
+            raw_type:     a.equipment_type_raw || type,
             tag,
             manufacturer: a.manufacturer || a.make || '',
             model:        a.model || '',
+            serial:       a.serial_number || '',
             qty:          parseInt(a.qty) || 1,
             location:     a.location || '',
             service_area: a.service_area || 'common_strata',
             category:     a.category || '',
             source:       'registry',
             equipment_id: a.id,
-            type_raw:     a.equipment_type_raw || type,
-            _review:      false,
+            ingestion_status: a.ingestion_status || 'normalized',
+            _review:      a.review_status === 'needs-review',
           });
           added++;
         }
@@ -406,6 +413,75 @@ async function _step2(el, wiz) {
   };
 
   _bindRawTable();
+
+  // Save to Registry — persist extracted rows to DB before proposal
+  document.getElementById('save-to-registry-btn').onclick = async () => {
+    const bid = S.building.building_id;
+    if (!bid) { notify && notify.warn && notify.warn('Select a building first to save to registry.'); return; }
+    _saveRawTable();
+    const rows = S.rawEquipment;
+    if (!rows.length) { notify && notify.warn && notify.warn('No equipment to save.'); return; }
+    const btn = document.getElementById('save-to-registry-btn');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    let saved = 0;
+    const batchId = Date.now().toString(36);
+    try {
+      for (const item of rows) {
+        if (item.source === 'registry' && item.equipment_id) continue; // already in DB
+        const mig = migrateLegacySumpPump({ rawTag: item.tag||'', rawLabel: item.type||'' });
+        const eTag = mig ? mig.rawTag : (item.tag||null);
+        const normRes = resolveEquipment({ rawTag: eTag||'', rawLabel: item.type||'' });
+        const normType  = (!normRes.manualReview && normRes.canonicalLabel) ? normRes.canonicalLabel : (item.type||'Other');
+        const needsRev  = normRes.manualReview || item._review;
+        const { findEquipType } = await import('./equipmaster.js');
+        const std = findEquipType(normType);
+        await EquipmentDB.create({
+          building_id:          bid,
+          tag:                  eTag||null,
+          equipment_type:       normType,
+          equipment_type_raw:   item.raw_type || item.type || normType,
+          manufacturer:         item.manufacturer || null,
+          model:                item.model         || null,
+          serial_number:        item.serial         || null,
+          qty:                  parseInt(item.qty)||1,
+          location:             item.location       || null,
+          service_area:         item.service_area   || 'common_strata',
+          notes:                item.notes          || null,
+          source_type:          item.source         || 'import',
+          source_file:          item.source_file    || null,
+          ocr_raw:              item._rowHint       || null,
+          match_confidence:     normRes.resolutionMethod === 'exact_tag' ? 'high'
+                                : normRes.resolutionMethod === 'exact_label' ? 'high'
+                                : normRes.resolutionMethod === 'exact_alias' ? 'medium'
+                                : normRes.resolutionMethod === 'normalized_alias' ? 'medium' : 'low',
+          review_status:        needsRev ? 'needs-review' : 'ok',
+          ingestion_status:     needsRev ? 'needs_review' : 'normalized',
+          quarterly_hours:      std?.quarterly_hours || null,
+          annual_hours:         std?.annual_hours    || null,
+          import_batch:         batchId,
+          status:               'active',
+        });
+        saved++;
+      }
+      const status = document.getElementById('equip-parse-status');
+      if (status) status.innerHTML = `<div class="badge badge-success">✓ Saved ${saved} row${saved!==1?'s':''} to equipment registry.</div>`;
+      // Reload from registry to get DB IDs and refresh source flags
+      const loaded = await EquipmentDB.getByBuilding(bid);
+      S.rawEquipment = (loaded||[]).map(a => ({
+        type: a.equipment_type, raw_type: a.equipment_type_raw||a.equipment_type,
+        tag: a.tag||'', manufacturer: a.manufacturer||a.make||'', model: a.model||'',
+        qty: parseInt(a.qty)||1, location: a.location||'', service_area: a.service_area||'common_strata',
+        category: a.category||'', source: 'registry', equipment_id: a.id, _review: a.review_status==='needs-review',
+      }));
+      document.getElementById('equip-table-wrap').innerHTML = _renderRawEquipTable();
+      _bindRawTable();
+    } catch(err) {
+      const status = document.getElementById('equip-parse-status');
+      if (status) status.innerHTML = `<div class="badge badge-danger">Save failed: ${err.message}</div>`;
+    } finally {
+      btn.disabled = false; btn.textContent = '💾 Save to Registry';
+    }
+  };
 }
 
 function _renderRawEquipTable() {
@@ -497,12 +573,20 @@ function _normHeader(h) { return String(h||'').toLowerCase().replace(/[^a-z0-9]/
 
 // Score a normalised header against a concept's known aliases
 const COL_ALIASES = {
-  type:         ['equipmenttype','type','equipment','description','desc','item','equip','equiptype','unittype','assettype','name','itemdescription'],
-  tag:          ['tag','id','unit','unitid','equipid','assetid','tagno','tagnumber','number','equiptag','label','unitno'],
-  manufacturer: ['manufacturer','make','brand','mfr','mfg','vendor','maker'],
+  // raw_equipment_type — raw contractor list headers first
+  type:         ['equipmenttype','item','type','equipment','description','desc','equip','equiptype',
+                 'unittype','assettype','name','itemdescription','service','servicedescription'],
+  // tag — "UNIT TAG" / "TAG NO" style headers
+  tag:          ['unittag','tagno','tagnumber','tag','unitno','unitid','equipid','assetid','equiptag','label','id'],
+  manufacturer: ['manufacturer','brand','make','mfr','mfg','vendor','maker','supplier'],
   model:        ['model','modelnumber','modelno','series','partnumber'],
-  qty:          ['qty','quantity','count','units','number','num','amount'],
-  location:     ['location','area','floor','room','zone','space','site','position','where','loc'],
+  serial:       ['serial','serialnumber','serialno','sn'],
+  qty:          ['qty','quantity','count','units','num','amount'],
+  location:     ['location','level','floor','room','zone','space','site','position','where','loc','area'],
+  notes:        ['notes','note','comments','comment','remark','remarks','filtersize','filters','belts','attributes'],
+  service_area: ['servicearea','service area','area type','areatype'],
+  // raw hours from spec sheets
+  std_hours:    ['time','stdtime','standardhours','stdhours','hours','hrs'],
 };
 
 function _detectColumns(headers) {
@@ -529,45 +613,85 @@ function _xlsxCellVal(row, key) {
   return '';
 }
 
+// Detect the real header row — skip preamble rows that lack a type/tag column.
+// Returns { rows, headerRowIdx } where rows is sheet_to_json output from the header row.
+function _detectHeaderRow(ws) {
+  const sheetRows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
+  // Score each row: header rows tend to have short, keyword-matching cells
+  const scoreRow = (cells) => {
+    const normed = cells.map(c => _normHeader(String(c||'')));
+    let score = 0;
+    for (const aliases of Object.values(COL_ALIASES)) {
+      if (normed.some(n => aliases.includes(n))) score++;
+    }
+    return score;
+  };
+  let bestIdx = 0, bestScore = 0;
+  // Only scan first 20 rows for header
+  for (let i = 0; i < Math.min(20, sheetRows.length); i++) {
+    const s = scoreRow(sheetRows[i]);
+    if (s > bestScore) { bestScore = s; bestIdx = i; }
+  }
+  if (bestScore === 0) return null; // no recognizable header
+  // Re-parse from the detected header row
+  const dataRows = XLSX.utils.sheet_to_json(ws, { defval: '', range: bestIdx });
+  return { rows: dataRows, headerRowIdx: bestIdx };
+}
+
 async function _parseXLSX(file) {
   if (!window.XLSX) throw new Error('SheetJS not loaded');
   const buf = await file.arrayBuffer();
   const wb  = XLSX.read(buf, { type: 'array' });
-  // Try all sheets, use first that has >1 row
-  let rows = [];
+
+  // Pick best sheet: most data rows with a detected header
+  let bestRows = [], bestSheet = '';
   for (const sheetName of wb.SheetNames) {
     const ws = wb.Sheets[sheetName];
-    const r  = XLSX.utils.sheet_to_json(ws, { defval: '' });
-    if (r.length > rows.length) rows = r;
+    const detected = _detectHeaderRow(ws);
+    if (detected && detected.rows.length > bestRows.length) {
+      bestRows = detected.rows; bestSheet = sheetName;
+    }
   }
-  if (!rows.length) return [];
+  // Fallback: plain json from largest sheet
+  if (!bestRows.length) {
+    for (const sheetName of wb.SheetNames) {
+      const ws = wb.Sheets[sheetName];
+      const r  = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      if (r.length > bestRows.length) bestRows = r;
+    }
+  }
+  if (!bestRows.length) return [];
 
-  const headers = Object.keys(rows[0]);
+  const headers = Object.keys(bestRows[0]);
   const colMap  = _detectColumns(headers);
 
-  return rows
+  return bestRows
     .map((r, rowIdx) => {
-      const type  = colMap.type         ? _xlsxCellVal(r, colMap.type).trim()         : '';
-      const tag   = colMap.tag          ? _xlsxCellVal(r, colMap.tag).trim()          : '';
-      const mfr   = colMap.manufacturer ? _xlsxCellVal(r, colMap.manufacturer).trim() : '';
-      const model = colMap.model        ? _xlsxCellVal(r, colMap.model).trim()        : '';
-      const loc   = colMap.location     ? _xlsxCellVal(r, colMap.location).trim()     : '';
-      const qtyRaw = colMap.qty         ? _xlsxCellVal(r, colMap.qty)                 : '1';
-      const qty   = Math.max(1, parseInt(qtyRaw, 10) || 1);
+      const type    = colMap.type         ? _xlsxCellVal(r, colMap.type).trim()         : '';
+      const tag     = colMap.tag          ? _xlsxCellVal(r, colMap.tag).trim()          : '';
+      const mfr     = colMap.manufacturer ? _xlsxCellVal(r, colMap.manufacturer).trim() : '';
+      const model   = colMap.model        ? _xlsxCellVal(r, colMap.model).trim()        : '';
+      const serial  = colMap.serial       ? _xlsxCellVal(r, colMap.serial).trim()       : '';
+      const loc     = colMap.location     ? _xlsxCellVal(r, colMap.location).trim()     : '';
+      const notes   = colMap.notes        ? _xlsxCellVal(r, colMap.notes).trim()        : '';
+      const svcArea = colMap.service_area ? _xlsxCellVal(r, colMap.service_area).trim() : '';
+      const qtyRaw  = colMap.qty          ? _xlsxCellVal(r, colMap.qty)                 : '1';
+      const qty     = Math.max(1, parseInt(qtyRaw, 10) || 1);
 
-      // Skip rows that are entirely blank
       const allVals = [type, tag, mfr, model, loc].join('').trim();
       if (!allVals) return null;
 
-      // Flag rows where type is missing so user can review
       const needsReview = !type;
-      // If type is empty, try to use the most content-rich cell as a description hint
       const typeVal = type || [tag, mfr, model, loc].find(v => v.length > 2) || '';
 
       return {
         type: typeVal,
-        tag, manufacturer: mfr, model, qty, location: loc,
+        raw_type: typeVal,          // preserve raw label
+        tag, manufacturer: mfr, model, serial, qty, location: loc,
+        notes: notes || undefined,
+        service_area: svcArea || undefined,
         source: 'xlsx',
+        source_file: file.name,
         _review: needsReview || false,
         _rowHint: needsReview ? `Row ${rowIdx + 2}: ${allVals.slice(0,60)}` : '',
       };
