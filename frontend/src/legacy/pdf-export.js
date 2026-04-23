@@ -60,11 +60,12 @@ function addFooter(doc, page, proposal) {
   const ph = co.contact_phone || co.phone || '604-298-8383';
   const em = co.email || 'john@mecmechanical.ca';
   const wb = co.website || 'www.mecmechanical.ca';
-  st(doc, [160,160,160]);
+  st(doc, [155,155,155]);
   doc.setFontSize(7); doc.setFont('helvetica','normal');
-  doc.text(`${co.name||'MEC Mechanical Inc.'}  ·  ${ph}  ·  ${em}  ·  ${wb}`, pw/2, 284, {align:'center'});
+  const footerY = 285;
+  doc.text(`${co.name||'MEC Mechanical Inc.'}  ·  ${ph}  ·  ${em}  ·  ${wb}`, pw/2, footerY, {align:'center'});
   if (proposal?.proposal_number) {
-    doc.text(`Proposal #${proposal.proposal_number}  ·  Page ${page}`, mr, 288, {align:'right'});
+    doc.text(`Page ${page}`, mr, footerY, {align:'right'});
   }
   st(doc, C.text);
 }
@@ -82,19 +83,20 @@ function addHeader(doc, title, propRef) {
     doc.text(co.name||'MEC Mechanical Inc.', ml, 13);
   }
 
-  // Title centered
+  // Title centered, vertically centered in bar
+  const midY = Math.round(hh/2) + 1;
   st(doc, C.white); doc.setFont('helvetica','bold'); doc.setFontSize(8.5);
-  doc.text(title, pw/2, 12, {align:'center'});
+  doc.text(title, pw/2, midY, {align:'center'});
 
-  // Proposal # right
+  // Proposal # right-aligned, same baseline as title
   if (propRef) {
     doc.setFont('helvetica','normal'); doc.setFontSize(7.5);
     st(doc, [160,180,220]);
-    doc.text(propRef, mr, 16, {align:'right'});
+    doc.text(propRef, mr, midY, {align:'right'});
   }
 
   st(doc, C.text);
-  return hh + 8; // y start below header
+  return hh + 8;
 }
 
 // ─── Section heading ──────────────────────────────────────────────────────────
@@ -213,8 +215,8 @@ export function generateProposalPDFEnhanced(proposal, building, coverImageDataUr
   // ── PAGE 1: COVER ────────────────────────────────────────────────────────────
   sf(doc, C.white); doc.rect(0, 0, pw, 279, 'F');
 
-  // Company band — slim, navy
-  const brandH = 22;
+  // Company band — slim, navy (18mm — tighter per spec)
+  const brandH = 18;
   sf(doc, C.navy); doc.rect(0, 0, pw, brandH, 'F');
 
   // Logo left — dark variant, larger (55×18mm)
@@ -320,7 +322,7 @@ export function generateProposalPDFEnhanced(proposal, building, coverImageDataUr
 
   doc.text('Attn: '+attn, ml, y); y += 5;
   if (building?.client_company && building?.client_name) { doc.text(building.client_company, ml, y); y += 5; }
-  if (bldAddr) { const bl=doc.splitTextToSize(bldAddr, mr-ml-20); doc.text(bl, ml, y); y += bl.length*5; }
+  if (bldAddr) { doc.setFont('helvetica','bold'); doc.text('Address:', ml, y); doc.setFont('helvetica','normal'); const bl=doc.splitTextToSize(bldAddr, mr-ml-30); doc.text(bl, ml+22, y); y += bl.length*5; }
   y += 4;
 
   doc.setFont('helvetica','bold');
@@ -578,7 +580,7 @@ export function generateProposalPDFEnhanced(proposal, building, coverImageDataUr
   Object.entries(typeScope).forEach(([type, data], idx) => {
     y = chk(doc, y, 24, page, proposal, 'Schedule B: Services');
     if (idx > 0) {
-      sd(doc, [200,210,225]); doc.setLineWidth(0.3); doc.line(ml, y, mr, y); y += 6;
+      sd(doc, [200,210,225]); doc.setLineWidth(0.3); doc.line(ml, y, mr, y); y += 8;
     }
     // Type heading — slightly larger, darker
     st(doc, C.charcoal); doc.setFont('helvetica','bold'); doc.setFontSize(10);
@@ -604,7 +606,7 @@ export function generateProposalPDFEnhanced(proposal, building, coverImageDataUr
         doc.text(w, ml+8, y); y += w.length*4.8;
       });
     }
-    y += 4;
+    y += 6;
   });
 
   if (subItems.length) {
