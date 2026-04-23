@@ -4,6 +4,7 @@ import { Proposals as DB, Buildings as BuildingsDB, Equipment as EquipmentDB } f
 import { CONFIG } from './config.js';
 import { sellFromHours, stdHours, deriveVisitCount as _engineVisitCount, assetToScopeItem } from './pm-engine.js';
 import { EQUIPMASTER, EQUIPMASTER_MANUFACTURERS, findEquipType, getStdHours, CATEGORIES } from './equipmaster.js';
+import { resolveEquipment, migrateLegacySumpPump } from './equip-normalize.js';
 import { getScopeText } from './scope-library.js';
 import { generateProposalPDFEnhanced } from './pdf-export.js';
 import { formatCurrency, today, addDays, pad } from './helpers.js';
@@ -378,7 +379,10 @@ async function _step2(el, wiz) {
         );
         if (!dup) {
           // Normalize type through aliases before adding — prevents type drift to Step 3
-          const resolved = _resolveType(item.type);
+          // Apply legacy tag migration before pushing
+          const migrated = migrateLegacySumpPump({ rawTag: item.tag, rawLabel: item.type });
+          if (migrated) { item.tag = migrated.rawTag; item._migrated = true; }
+          const resolved = _resolveType(item.type, item.tag);
           if (resolved && item.type && !item._review) {
             item.type_raw = item.type;
             item.type = resolved.equipment_type;
@@ -778,21 +782,23 @@ const WIZ_TYPE_ALIASES = {
   'Expansion Tank':       ['exp tank','expansion vessel','bladder tank'],
 };
 
-function _resolveType(rawType) {
-  if (!rawType) return null;
-  const lower = rawType.toLowerCase().trim();
-  // Check explicit aliases first
-  for (const [canonical, aliases] of Object.entries(WIZ_TYPE_ALIASES)) {
-    if (aliases.some(a => lower === a || lower.includes(a) || a.includes(lower))) {
-      return findEquipType(canonical) || null;
-    }
+function _resolveType(rawType, rawTag) {
+  if (!rawType && !rawTag) return null;
+  // Use canonical normalization layer (deterministic, no fuzzy matching)
+  const result = resolveEquipment({ rawTag: rawTag||'', rawLabel: rawType||'' });
+  if (!result.manualReview && result.canonicalLabel) {
+    return findEquipType(result.canonicalLabel) || null;
   }
-  return findEquipType(rawType);
+  // Fallback to direct EQUIPMASTER lookup for manual-review cases
+  return findEquipType(rawType) || null;
 }
 
 function _normalizeItem(raw) {
-  const match = _resolveType(raw.type);
+  const match = _resolveType(raw.type, raw.tag);
   let conf = 'unknown', qtrHrs = 1.0, annHrs = 4.0, category = raw.category || 'Other', equipmaster = null;
+  // Also run through normalize layer for review flags
+  const _normResult = resolveEquipment({ rawTag: raw.tag||'', rawLabel: raw.type||'' });
+  if (_normResult.manualReview) raw._review = true;
   if (match) {
     equipmaster = match.equipment_type;
     category    = raw.category || match.category || 'Other';

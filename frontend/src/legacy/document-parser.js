@@ -1,6 +1,7 @@
 import { notify, openModal, closeModal, spinner } from './ui.js';
 import { Buildings, Equipment as EquipDB } from './db.js';
 import { CONFIG } from './config.js';
+import { resolveEquipment, migrateLegacySumpPump } from './equip-normalize.js';
 import { EQUIPMASTER } from './equipmaster.js';
 import { Equipment } from './equipment.js';
 
@@ -551,10 +552,15 @@ async function runImport(state, indices) {
     } catch {}
 
     try {
+      // Apply normalization + migration before DB write
+      const _mig = migrateLegacySumpPump({ rawTag: it.tag||'', rawLabel: it.equipment_type||'' });
+      const _normTag = _mig ? _mig.rawTag : (it.tag||null);
+      const _normRes = resolveEquipment({ rawTag: _normTag||'', rawLabel: it.equipment_type||'' });
+      const _finalType = (!_normRes.manualReview && _normRes.canonicalLabel) ? _normRes.canonicalLabel : (it.equipment_type||'Other');
       await EquipDB.create({
         building_id:    bid,
-        tag:            it.tag || null,
-        equipment_type: it.equipment_type || 'Other',
+        tag:            _normTag || null,
+        equipment_type: _finalType,
         manufacturer:   it.make || null,
         make:           it.make || null,
         model:          it.model || null,
